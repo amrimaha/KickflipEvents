@@ -107,7 +107,7 @@ declare global {
   }
 }
 
-const GOOGLE_CLIENT_ID: string = '405524843730-ijtru0dst6pfpkubkj55ft5vv9v8kb4g.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 // Time-based greeting logic
 const getPersonalizedGreeting = (name: string): string => {
