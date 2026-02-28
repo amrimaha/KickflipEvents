@@ -1257,8 +1257,8 @@ const App: React.FC = () => {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-32">
                   {filteredEvents.length > 0 ? (
-                    filteredEvents.map((event, i) => (
-                      <div key={event.id} className={`${(i === 0 || i === 7) ? 'sm:col-span-2' : ''}`}>
+                    filteredEvents.map((event) => (
+                      <div key={event.id}>
                           <EventCard 
                             event={event} 
                             theme={theme} 
