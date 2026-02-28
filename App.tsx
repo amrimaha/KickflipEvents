@@ -1130,7 +1130,7 @@ const App: React.FC = () => {
              <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
                 <div className="flex flex-col">
                     <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">Seattle</span>
+                    <span className="text-[10px] font-bold lowercase tracking-[0.3em] text-white/40 ml-0.5">beta</span>
                 </div>
              </div>
           </div>
@@ -1144,7 +1144,7 @@ const App: React.FC = () => {
           {messages.map((msg, idx) => (
             <div key={idx} ref={msg.role === 'user' ? latestUserMessageRef : null} className={`w-full flex flex-col gap-2 ${msg.role === 'user' ? 'items-end mt-2' : 'items-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
               <div className={`max-w-[95%] md:max-w-[90%] ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                  <p className="inline-block whitespace-pre-line text-4xl md:text-7xl font-bold leading-[1.1] tracking-tighter drop-shadow-md" style={{ color: msg.role === 'model' ? theme.accentColor : 'white' }}>{msg.text}</p>
+                  <p className="inline-block whitespace-pre-line text-3xl md:text-5xl font-bold leading-[1.1] tracking-tighter drop-shadow-md" style={{ color: msg.role === 'model' ? theme.accentColor : 'white' }}>{msg.text}</p>
               </div>
               {msg.events && msg.events.length > 0 && (
                 <div className="w-full mt-12 mb-4 animate-in slide-in-from-bottom-10 fade-in duration-700">
@@ -1169,8 +1169,8 @@ const App: React.FC = () => {
           
           {isHome && (
             <>
-              {/* Fixed "Plan my weekend" feature pill */}
-              <div className="flex mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+              <div className="flex flex-wrap gap-3 mt-4 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 justify-start">
+                {/* Fixed "Plan my weekend" feature pill — always first */}
                 <button
                   onClick={() => handleSendMessage("Plan my weekend in Seattle — give me a mix of things to do Friday night, Saturday, and Sunday")}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg"
@@ -1179,9 +1179,6 @@ const App: React.FC = () => {
                   <span>🗓️</span>
                   Plan my weekend
                 </button>
-              </div>
-
-              <div className="flex flex-wrap gap-3 mt-3 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 justify-start">
                 {suggestionChips.map((chip, index) => (
                   <button
                     key={index} onClick={() => handleSendMessage(chip)}
