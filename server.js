@@ -331,20 +331,31 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ─── POST /api/crawl — Daily batch crawl (Railway cron) ──────────────
+// ─── POST /api/crawl — Daily batch crawl (Railway cron or on-demand) ──
 
 app.post('/api/crawl', async (req, res) => {
-  // Simple token guard so only Railway cron can trigger this
   const authHeader = req.headers['authorization'];
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  console.log('[cron] Daily crawl triggered');
-  res.json({ status: 'Crawl started', timestamp: new Date().toISOString() });
+  console.log('[crawl] Starting — window: today → +7 days');
 
-  // Run crawl asynchronously after response sent
-  runCrawl().catch(err => console.error('Crawl error:', err));
+  // Set a longer timeout for this endpoint (crawl can take ~60s)
+  req.setTimeout(120000);
+  res.setTimeout(120000);
+
+  try {
+    const summary = await runCrawl();
+    return res.json({
+      status: 'Crawl complete',
+      timestamp: new Date().toISOString(),
+      ...summary,
+    });
+  } catch (err) {
+    console.error('[crawl] Failed:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── POST /api/seed — One-time embedding seed ────────────────────────
