@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { KickflipEvent, ThemeConfig } from '../types';
 import { getVideoForEvent, CATEGORY_COLORS } from '../constants';
-import { EventVibemojiRenderer } from './EventVibemojiRenderer';
 
 interface EventCardProps {
   event: KickflipEvent;
@@ -407,14 +406,7 @@ export const EventCard: React.FC<EventCardProps> = ({
                             </span>
                         )}
                     </div>
-                    <div className="flex items-end justify-between">
-                         <h2 className="text-3xl md:text-4xl font-black text-white leading-none mb-1 drop-shadow-xl">{event.title}</h2>
-                         {event.vibemoji && (
-                             <div className="w-16 h-16 pointer-events-auto">
-                                 <EventVibemojiRenderer config={event.vibemoji} className="w-full h-full drop-shadow-lg" />
-                             </div>
-                         )}
-                    </div>
+                    <h2 className="text-3xl md:text-4xl font-black text-white leading-none mb-1 drop-shadow-xl">{event.title}</h2>
                     {event.organizer && (
                         <p className="text-white/60 text-sm font-medium">Hosted by <span className="text-white">{event.organizer}</span></p>
                     )}
@@ -649,15 +641,6 @@ export const EventCard: React.FC<EventCardProps> = ({
           <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.42)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             @{event.city || displayLocation}
           </p>
-
-          {/* Vibemoji */}
-          {event.vibemoji && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-              <div style={{ width: 30, height: 30 }}>
-                <EventVibemojiRenderer config={event.vibemoji} className="w-full h-full" />
-              </div>
-            </div>
-          )}
 
           {extraContent && (
             <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>

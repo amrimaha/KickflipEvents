@@ -1,12 +1,9 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { VideoBackground } from './components/VideoBackground';
 import { ChatInput } from './components/ChatInput';
 import { EventCard } from './components/EventCard';
 import { ThemeWidget } from './components/ThemeWidget';
-import { VibemojiRenderer } from './components/Vibemojis';
 import { SideDrawer } from './components/SideDrawer';
-import { CalendarWidget } from './components/CalendarWidget';
 import { CreateEventView } from './components/CreateEventView';
 import { DashboardView } from './components/DashboardView';
 import { ProfileView } from './components/ProfileView';
@@ -397,7 +394,6 @@ const App: React.FC = () => {
   const [filterTime, setFilterTime] = useState<'all' | 'tonight' | 'weekend' | 'custom'>('all');
   const [filterVibe, setFilterVibe] = useState<string>('');
   
-  const [showCalendar, setShowCalendar] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const latestUserMessageRef = useRef<HTMLDivElement>(null);
@@ -905,12 +901,42 @@ const App: React.FC = () => {
     });
   }, [currentEvents, filterCategory, filterVibe, filterTime, selectedDate, allActiveEvents]);
 
+  // --- DAY TABS (kickflip-psi style: Anytime + next 7 days) ---
+  const dayTabs = useMemo(() => {
+    const tabs: Array<{ label: string; date: Date | null; count: number }> = [];
+    tabs.push({ label: 'Anytime', date: null, count: allActiveEvents.length });
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayNum = d.getDate();
+      const count = allActiveEvents.filter(evt => {
+        if (evt.startDate) {
+          const [y, m, day] = evt.startDate.split('-').map(Number);
+          return new Date(y, m - 1, day).toDateString() === d.toDateString();
+        }
+        return false;
+      }).length;
+      tabs.push({ label: `${dayName} ${dayNum}`, date: new Date(d), count });
+    }
+    return tabs;
+  }, [allActiveEvents]);
+
+  // --- CATEGORY COUNTS ---
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: allActiveEvents.length };
+    allActiveEvents.forEach(evt => {
+      const cat = evt.category.toLowerCase();
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [allActiveEvents]);
+
   const handleTagClick = (tag: string) => {
     setFilterVibe(tag.replace(/^#/, ''));
   };
 
   const isHome = messages.length <= 1 && loadingState === LoadingState.IDLE;
-  const isOverlayDark = currentEvents.length > 0 || !isHome;
 
   // --- ROUTER VIEW SWITCHING ---
 
@@ -1091,8 +1117,6 @@ const App: React.FC = () => {
         hasEvents={createdEvents.some(e => e.creatorId === user?.id)}
       />
 
-      <VideoBackground key={theme.backgroundUrl} src={theme.backgroundUrl} type={theme.backgroundType} isOverlayDark={isOverlayDark} />
-
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
         {/* Persistent Top Navigation */}
         <header className="sticky top-0 z-50 p-6 w-full flex justify-between items-start transition-all">
@@ -1100,13 +1124,10 @@ const App: React.FC = () => {
              <button onClick={() => setIsDrawerOpen(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
              </button>
-             <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3 group" onClick={startNewChat}>
-                <div className="pt-1">
-                    <VibemojiRenderer id={theme.vibemoji} className="w-14 h-14 md:w-16 md:h-16 drop-shadow-lg transform group-hover:scale-110 transition-all duration-300"/>
-                </div>
+             <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
                 <div className="flex flex-col">
                     <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">Beta</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">Seattle</span>
                 </div>
              </div>
           </div>
@@ -1130,7 +1151,7 @@ const App: React.FC = () => {
                         key={event.id} 
                         event={event} 
                         theme={theme} 
-                        className={`${i % 3 === 0 ? 'w-[300px] sm:w-[350px]' : 'w-[280px] sm:w-[320px]'} h-[500px] sm:h-[580px]`} 
+                        className={`${i % 3 === 0 ? 'w-[320px] sm:w-[360px]' : 'w-[300px] sm:w-[320px]'}`}
                         onTagClick={handleTagClick}
                         isSuperAdmin={isSuperAdmin}
                         onEdit={handleAdminEdit}
@@ -1162,80 +1183,62 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="mb-6 border-b border-white/10 pb-4">
-                    <div className={`relative flex flex-col sm:flex-row gap-4 w-fit items-start sm:items-center justify-start self-start ${showCalendar ? 'z-[60]' : 'z-30'}`}>
-                      <div className="flex bg-white/5 rounded-lg p-1 gap-1">
-                        <button 
-                            onClick={() => { setFilterTime('tonight'); setSelectedDate(null); setShowCalendar(false); }}
-                            className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all ${filterTime === 'tonight' ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-                        >
-                          Tonight
-                        </button>
-                        <button 
-                            onClick={() => { setFilterTime('weekend'); setSelectedDate(null); setShowCalendar(false); }}
-                            className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all ${filterTime === 'weekend' ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-                        >
-                          Weekend
-                        </button>
-                        
-                        <div className="relative">
-                            <button 
-                              onClick={() => setShowCalendar(!showCalendar)}
-                              className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${
-                                filterTime === 'custom' || filterTime === 'all' 
-                                  ? 'text-black shadow-lg' 
-                                  : 'text-white/60 hover:text-white hover:bg-white/5'
-                              }`}
-                              style={{
-                                  backgroundColor: filterTime === 'custom' || filterTime === 'all' 
-                                    ? (selectedDate ? theme.accentColor : 'white') 
-                                    : 'transparent'
-                              }}
-                            >
-                              {selectedDate ? selectedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric'}) : "Anytime"}
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showCalendar ? 'rotate-180' : ''}`}>
-                                <polyline points="6 9 12 15 18 9"></polyline>
-                              </svg>
-                            </button>
-                            
-                            {showCalendar && (
-                              <CalendarWidget 
-                                onSelectDate={(date) => { setSelectedDate(date); setFilterTime('custom'); setShowCalendar(false); }}
-                                onClear={() => { setSelectedDate(null); setFilterTime('all'); setShowCalendar(false); }}
-                                onClose={() => setShowCalendar(false)}
-                                accentColor={theme.accentColor}
-                                selectedDate={selectedDate}
-                              />
+                    {/* Day-of-week tabs — kickflip-psi style */}
+                    <div className="flex gap-1 overflow-x-auto no-scrollbar bg-white/5 rounded-lg p-1 w-fit max-w-full">
+                      {dayTabs.map((tab, idx) => {
+                        const isActive = tab.date === null
+                          ? (filterTime === 'all' || filterTime === 'tonight' || filterTime === 'weekend')
+                          : filterTime === 'custom' && selectedDate?.toDateString() === tab.date.toDateString();
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              if (tab.date === null) {
+                                setFilterTime('all'); setSelectedDate(null);
+                              } else {
+                                setFilterTime('custom'); setSelectedDate(tab.date);
+                              }
+                            }}
+                            className={`flex-shrink-0 px-3 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                              isActive ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            {tab.label}
+                            {!isActive && tab.count > 0 && (
+                              <span className="ml-1 opacity-50 font-normal">{tab.count}</span>
                             )}
-                        </div>
-                      </div>
-
-                      {filterVibe && (
-                        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/20 animate-in fade-in">
-                            <span className="text-xs text-white/60 uppercase font-bold">Vibe:</span>
-                            <span className="text-sm font-bold text-white">#{filterVibe}</span>
-                            <button onClick={() => setFilterVibe('')} className="p-0.5 rounded-full hover:bg-white/20 text-white/50 hover:text-white">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
-                        </div>
-                      )}
+                          </button>
+                        );
+                      })}
                     </div>
 
+                    {filterVibe && (
+                      <div className="flex items-center gap-2 px-4 py-2 mt-3 rounded-full bg-white/10 border border-white/20 animate-in fade-in w-fit">
+                          <span className="text-xs text-white/60 uppercase font-bold">Vibe:</span>
+                          <span className="text-sm font-bold text-white">#{filterVibe}</span>
+                          <button onClick={() => setFilterVibe('')} className="p-0.5 rounded-full hover:bg-white/20 text-white/50 hover:text-white">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                          </button>
+                      </div>
+                    )}
+
+                    {/* Category tabs with event counts */}
                     <div className="flex gap-2 mt-4 justify-start overflow-x-auto no-scrollbar pb-2 snap-x">
                       <button
                         onClick={() => setFilterCategory('all')}
                         className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start ${
-                          filterCategory === 'all' 
-                            ? 'bg-white text-black border-white' 
+                          filterCategory === 'all'
+                            ? 'bg-white text-black border-white'
                             : 'bg-transparent text-white/60 border-white/20 hover:border-white hover:text-white'
                         }`}
                       >
-                        All
+                        All {categoryCounts.all > 0 && <span className="ml-1 opacity-60 font-normal">{categoryCounts.all}</span>}
                       </button>
                       {Object.keys(CATEGORY_COLORS).map(cat => (
                         <button
                           key={cat}
                           onClick={() => setFilterCategory(cat)}
-                          className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start`}
+                          className="flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start"
                           style={{
                             backgroundColor: filterCategory === cat ? CATEGORY_COLORS[cat] : 'transparent',
                             borderColor: CATEGORY_COLORS[cat],
@@ -1243,7 +1246,7 @@ const App: React.FC = () => {
                             opacity: filterCategory === 'all' || filterCategory === cat ? 1 : 0.6
                           }}
                         >
-                          {cat}
+                          {cat}{categoryCounts[cat] ? <span className="ml-1 opacity-60 font-normal">{categoryCounts[cat]}</span> : null}
                         </button>
                       ))}
                     </div>
@@ -1256,7 +1259,7 @@ const App: React.FC = () => {
                           <EventCard 
                             event={event} 
                             theme={theme} 
-                            className="w-full h-[320px] sm:h-[400px]" 
+                            className="w-full"
                             onTagClick={handleTagClick}
                             isSuperAdmin={isSuperAdmin}
                             onEdit={handleAdminEdit}
