@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { ThemeConfig } from '../types';
 import { BACKGROUND_OPTIONS } from '../constants';
-import { VIBEMOJIS, VibemojiRenderer } from './Vibemojis';
 
 interface ThemeWidgetProps {
   currentTheme: ThemeConfig;
@@ -44,27 +43,6 @@ export const ThemeWidget: React.FC<ThemeWidgetProps> = ({ currentTheme, onUpdate
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
           <div className="absolute right-0 mt-2 w-72 bg-[#111] border border-white/10 rounded-xl shadow-2xl p-4 z-50 animate-in slide-in-from-top-2 fade-in duration-200 overflow-y-auto max-h-[80vh] custom-scrollbar">
             
-            {/* Vibemoji */}
-            <div className="mb-5">
-              <label className="text-xs font-bold text-white/50 uppercase tracking-wider mb-2 block">Vibemoji</label>
-              <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                {VIBEMOJIS.map(emoji => (
-                  <button
-                    key={emoji.id}
-                    onClick={() => onUpdate({ ...currentTheme, vibemoji: emoji.id })}
-                    className={`flex-shrink-0 w-12 h-12 p-1 rounded-lg transition-all border ${
-                      currentTheme.vibemoji === emoji.id 
-                        ? 'bg-white/10 border-white scale-110' 
-                        : 'border-transparent hover:bg-white/5'
-                    }`}
-                    title={emoji.label}
-                  >
-                     <VibemojiRenderer id={emoji.id} className="w-full h-full drop-shadow-sm" />
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Typography */}
             <div className="mb-5">
               <label className="text-xs font-bold text-white/50 uppercase tracking-wider mb-2 block">Typography</label>

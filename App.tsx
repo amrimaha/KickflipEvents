@@ -53,7 +53,7 @@ const CATEGORY_CHIPS = [
 
 const generateSessionChips = () => {
   const shuffle = (arr: string[]) => [...arr].sort(() => Math.random() - 0.5);
-  const count = Math.floor(Math.random() * 3) + 5; 
+  const count = 4;
   
   const qCount = Math.floor(count / 2) + (count % 2 === 1 ? (Math.random() > 0.5 ? 1 : 0) : 0);
   const cCount = count - qCount;
