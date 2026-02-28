@@ -1169,7 +1169,19 @@ const App: React.FC = () => {
           
           {isHome && (
             <>
-              <div className="flex flex-wrap gap-3 mt-4 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 justify-start">
+              {/* Fixed "Plan my weekend" feature pill */}
+              <div className="flex mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+                <button
+                  onClick={() => handleSendMessage("Plan my weekend in Seattle — give me a mix of things to do Friday night, Saturday, and Sunday")}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg"
+                  style={{ backgroundColor: theme.accentColor, color: '#000', boxShadow: `0 0 16px ${theme.accentColor}60` }}
+                >
+                  <span>🗓️</span>
+                  Plan my weekend
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-3 mt-3 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 justify-start">
                 {suggestionChips.map((chip, index) => (
                   <button
                     key={index} onClick={() => handleSendMessage(chip)}
