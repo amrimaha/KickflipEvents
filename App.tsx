@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { VideoBackground } from './components/VideoBackground';
 import { ChatInput } from './components/ChatInput';
 import { EventCard } from './components/EventCard';
 import { ThemeWidget } from './components/ThemeWidget';
@@ -1116,6 +1117,8 @@ const App: React.FC = () => {
         onOpenSettings={() => { setIsDrawerOpen(false); setShowBackendConfig(true); }}
         hasEvents={createdEvents.some(e => e.creatorId === user?.id)}
       />
+
+      <VideoBackground key={theme.backgroundUrl} src={theme.backgroundUrl} type={theme.backgroundType} isOverlayDark={currentEvents.length > 0 || messages.length > 1} />
 
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
         {/* Persistent Top Navigation */}
