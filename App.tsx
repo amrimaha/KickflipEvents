@@ -1130,7 +1130,7 @@ const App: React.FC = () => {
              <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
                 <div className="flex flex-col">
                     <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
-                    <span className="text-[10px] font-bold lowercase tracking-[0.3em] text-white/40 ml-0.5">beta</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">BETA</span>
                 </div>
              </div>
           </div>
