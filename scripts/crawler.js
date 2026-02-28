@@ -1,13 +1,14 @@
 /**
  * crawler.js
- * Daily batch crawler for Seattle events — 7-day forward window only.
+ * Daily batch crawler — uses Claude web_search to find real Seattle events.
  *
- * Rules:
- *  - Only future events (today → +7 days)
- *  - Past or expired events are rejected before storage
- *  - Each event gets a Voyage AI embedding stored once in Supabase
- *  - Duplicate events (same id or same title+date) are upserted, not duplicated
- *  - Returns a detailed summary: { eventsFound, eventsStored, eventsDuplicate, eventsRejected, errors }
+ * Why web_search instead of raw HTML fetch:
+ * Most event sites (Eventbrite, RA, Axs) are JS-rendered — a plain fetch
+ * returns an empty shell. Claude's built-in web_search handles this correctly.
+ *
+ * Strategy: 3 targeted searches covering the main Seattle event categories.
+ * Each search = 1 Claude call with web_search tool.
+ * Results are deduplicated, date-filtered, embedded, and stored in Supabase.
  */
 
 import 'dotenv/config';
@@ -22,7 +23,6 @@ const supabase = createClient(
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Only keep events for the next 7 days
 const WINDOW_DAYS = 7;
 
 // ─────────────────────────────────────────────
@@ -31,173 +31,179 @@ const WINDOW_DAYS = 7;
 
 function getWindowBounds() {
   const now = new Date();
-  now.setHours(0, 0, 0, 0); // start of today Seattle time
-  const windowEnd = new Date(now);
-  windowEnd.setDate(windowEnd.getDate() + WINDOW_DAYS);
-  return { windowStart: now, windowEnd };
+  now.setHours(0, 0, 0, 0);
+  const end = new Date(now);
+  end.setDate(end.getDate() + WINDOW_DAYS);
+  return { windowStart: now, windowEnd: end };
 }
 
-/**
- * Returns true if the event's startDate is within today → +7 days.
- * Accepts YYYY-MM-DD format. If startDate is missing/unknown, allows it through
- * with a flag so Claude can still use it (undated events like "See Calendar").
- */
+function formatDate(d) {
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    timeZone: 'America/Los_Angeles',
+  });
+}
+
 function isWithinWindow(event, windowStart, windowEnd) {
-  if (!event.startDate || event.startDate === 'See Website' || event.startDate === '') {
+  if (!event.startDate || event.startDate === 'See Website') {
     return { valid: true, reason: 'undated' };
   }
   const d = new Date(event.startDate);
-  if (isNaN(d.getTime())) return { valid: true, reason: 'unparseable-date' };
+  if (isNaN(d.getTime())) return { valid: true, reason: 'unparseable' };
   if (d < windowStart) return { valid: false, reason: `past (${event.startDate})` };
-  if (d > windowEnd) return { valid: false, reason: `beyond-7-days (${event.startDate})` };
+  if (d > windowEnd)   return { valid: false, reason: `beyond window (${event.startDate})` };
   return { valid: true, reason: 'in-window' };
 }
 
 // ─────────────────────────────────────────────
-// CRAWL SOURCES
+// SEARCH QUERIES — 2 targeted Claude+web_search calls
 // ─────────────────────────────────────────────
 
-const SOURCES = [
-  {
-    name: 'Eventbrite Seattle',
-    url: 'https://www.eventbrite.com/d/wa--seattle/events/',
-  },
-  {
-    name: 'Seattle.gov Events',
-    url: 'https://www.seattle.gov/neighborhoods/programs-and-services/events',
-  },
-  {
-    name: 'Resident Advisor Seattle',
-    url: 'https://ra.co/events/us/seattle',
-  },
-  {
-    name: 'The Stranger Events',
-    url: 'https://www.thestranger.com/events',
-  },
-];
+function buildSearches(todayStr, windowEndStr) {
+  return [
+    {
+      name: 'Music, Nightlife & Arts',
+      prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
+
+Find events in these categories: live music, concerts, DJ nights, comedy shows, art exhibitions, gallery openings, theatre, film screenings, spoken word.
+
+Search sites like eventbrite.com, ra.co, thestranger.com, axs.com, ticketmaster.com, seattlearts.org.
+
+Return a JSON array of all events you find:
+[{
+  "id": "crawl-<slugified-title>-<YYYYMMDD>",
+  "title": "Event Title",
+  "date": "Sat, Mar 1 2026",
+  "startDate": "2026-03-01",
+  "startTime": "8:00 PM",
+  "location": "Venue Name, Seattle WA",
+  "description": "2-3 sentences about the event vibe and what to expect",
+  "category": "music",
+  "vibeTags": ["#live", "#indie"],
+  "price": "$25",
+  "link": "https://real-event-url.com",
+  "organizer": "Organizer Name",
+  "origin": "crawl",
+  "crawlSource": "Eventbrite"
+}]
+
+Rules:
+- Only include events from ${todayStr} to ${windowEndStr}
+- Use real event URLs from your search results
+- category must be one of: music, art, comedy, other
+- Return ONLY the JSON array, no other text`,
+    },
+    {
+      name: 'Food, Markets & Outdoor',
+      prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
+
+Find events in these categories: food festivals, night markets, farmers markets, outdoor activities, sports events, wellness classes, fitness events, community gatherings, cultural festivals.
+
+Search sites like eventbrite.com, seattle.gov, thestranger.com, downtownseattle.org, timeout.com/seattle.
+
+Return a JSON array of all events you find:
+[{
+  "id": "crawl-<slugified-title>-<YYYYMMDD>",
+  "title": "Event Title",
+  "date": "Sun, Mar 2 2026",
+  "startDate": "2026-03-02",
+  "startTime": "10:00 AM",
+  "location": "Venue Name, Seattle WA",
+  "description": "2-3 sentences about the event vibe and what to expect",
+  "category": "food",
+  "vibeTags": ["#market", "#outdoor"],
+  "price": "Free",
+  "link": "https://real-event-url.com",
+  "organizer": "Organizer Name",
+  "origin": "crawl",
+  "crawlSource": "Seattle.gov"
+}]
+
+Rules:
+- Only include events from ${todayStr} to ${windowEndStr}
+- Use real event URLs from your search results
+- category must be one of: food, outdoor, wellness, sports, fashion, party, other
+- Return ONLY the JSON array, no other text`,
+    },
+  ];
+}
 
 // ─────────────────────────────────────────────
-// FETCH RAW HTML
+// RUN ONE CLAUDE WEB_SEARCH CALL
 // ─────────────────────────────────────────────
 
-async function fetchSource(source) {
-  try {
-    console.log(`  📡 Fetching: ${source.name}`);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+async function searchWithClaude(search) {
+  console.log(`\n  🔍 Searching: "${search.name}"...`);
 
-    const response = await fetch(source.url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; KickflipBot/1.0)',
-        'Accept': 'text/html,application/xhtml+xml',
+  const conversationMessages = [{ role: 'user', content: search.prompt }];
+  let finalText = '';
+  const MAX_TURNS = 8;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const response = await anthropic.messages.create(
+      {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: conversationMessages,
       },
-    });
+      { headers: { 'anthropic-beta': 'web-search-2025-03-05' } }
+    );
 
-    clearTimeout(timeout);
+    const textBlocks = response.content.filter(b => b.type === 'text');
+    if (textBlocks.length > 0) finalText = textBlocks.map(b => b.text).join('');
+    if (response.stop_reason === 'end_turn') break;
 
-    if (!response.ok) {
-      console.warn(`  ⚠️  ${source.name}: HTTP ${response.status}`);
-      return null;
-    }
+    if (response.stop_reason === 'tool_use') {
+      conversationMessages.push({ role: 'assistant', content: response.content });
+      const toolResults = response.content
+        .filter(b => b.type === 'tool_use')
+        .map(b => {
+          const resultBlock = response.content.find(
+            rb => rb.type === 'web_search_tool_result_20250305' && rb.tool_use_id === b.id
+          );
+          return {
+            type: 'tool_result',
+            tool_use_id: b.id,
+            content: resultBlock ? resultBlock.content : 'Search complete.',
+          };
+        });
+      if (toolResults.length > 0) conversationMessages.push({ role: 'user', content: toolResults });
+      else break;
+    } else break;
+  }
 
-    const html = await response.text();
-    const cleaned = html
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-      .slice(0, 15000);
-
-    console.log(`  ✅ ${source.name}: ${cleaned.length} chars`);
-    return { source, text: cleaned };
+  // Parse JSON array from Claude's response
+  const jsonMatch = finalText.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    console.warn(`  ⚠️  No JSON array in response for "${search.name}"`);
+    return [];
+  }
+  try {
+    const events = JSON.parse(jsonMatch[0]);
+    console.log(`  ✅ "${search.name}": ${events.length} events found`);
+    return events;
   } catch (err) {
-    console.warn(`  ❌ ${source.name} failed: ${err.message}`);
-    return null;
+    console.warn(`  ⚠️  JSON parse failed for "${search.name}": ${err.message}`);
+    return [];
   }
 }
 
 // ─────────────────────────────────────────────
-// STRUCTURE WITH CLAUDE (1 call for all sources)
+// DEDUPLICATE BY TITLE + DATE
 // ─────────────────────────────────────────────
 
-async function structureWithClaude(rawResults, windowStart, windowEnd) {
-  const todayStr = windowStart.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    timeZone: 'America/Los_Angeles',
-  });
-  const windowEndStr = windowEnd.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    timeZone: 'America/Los_Angeles',
-  });
-
-  const combinedText = rawResults
-    .map(r => `=== SOURCE: ${r.source.name} (${r.source.url}) ===\n${r.text}`)
-    .join('\n\n');
-
-  const prompt = `You are a data extraction assistant for Kickflip, a Seattle event discovery app.
-
-TODAY: ${todayStr} (Seattle Time)
-EXTRACT ONLY events happening between TODAY and ${windowEndStr} (next 7 days).
-DO NOT include past events or events beyond 7 days from today.
-
-Extract ALL upcoming events within this 7-day window from the raw text below.
-
-RULES:
-- Only include events happening today through ${windowEndStr}
-- Skip any event with a past date
-- Extract as many events as possible — do not skip events in the window
-- category must be one of: music, food, art, party, outdoor, wellness, fashion, sports, comedy, other
-- vibeTags must be an array of hashtag strings like ["#music", "#live"]
-- startDate must be YYYY-MM-DD format (e.g. "2026-03-01")
-- If exact date is unclear but within the window, write today's date as startDate
-- link must be the real event URL if visible, otherwise the source URL
-- price: use "Free" if free, "$X" if known, "Varies" if unclear
-- id must be unique: use "crawl-<slug>-<YYYYMMDD>" format
-
-RESPOND WITH VALID JSON ONLY — a flat array of event objects:
-[
-  {
-    "id": "crawl-event-slug-20260301",
-    "title": "Event Title",
-    "date": "Sun, Mar 1 2026",
-    "startDate": "2026-03-01",
-    "startTime": "7:00 PM",
-    "location": "Venue Name, Seattle",
-    "description": "2-3 sentence description of the event vibe",
-    "category": "music",
-    "vibeTags": ["#live", "#indie"],
-    "price": "$25",
-    "link": "https://...",
-    "organizer": "Organizer Name",
-    "origin": "crawl",
-    "crawlSource": "Source Name"
+function deduplicate(events) {
+  const seen = new Map();
+  const unique = [];
+  for (const event of events) {
+    const key = `${(event.title || '').toLowerCase().trim()}__${event.startDate || ''}`;
+    if (!seen.has(key)) {
+      seen.set(key, true);
+      unique.push(event);
+    }
   }
-]
-
-RAW EVENT DATA:
-${combinedText}`;
-
-  try {
-    console.log('\n🤖 Structuring with Claude (1 call for all sources)...');
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const text = message.content[0]?.text || '';
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error('No JSON array in Claude response');
-
-    const events = JSON.parse(jsonMatch[0]);
-    console.log(`  ✅ Claude extracted ${events.length} candidate events`);
-    return events;
-  } catch (err) {
-    console.error(`  ❌ Claude structuring failed: ${err.message}`);
-    return [];
-  }
+  return unique;
 }
 
 // ─────────────────────────────────────────────
@@ -205,22 +211,26 @@ ${combinedText}`;
 // ─────────────────────────────────────────────
 
 async function upsertEvents(events, vectors, windowEnd) {
-  // Events expire the day after the window closes
   const expiresAt = new Date(windowEnd);
   expiresAt.setDate(expiresAt.getDate() + 1);
 
-  let stored = 0;
-  let duplicates = 0;
-  let errors = 0;
+  let stored = 0, duplicates = 0, errors = 0;
   const storedTitles = [];
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
     const embedding = vectors[i];
 
+    // Ensure id is set
+    if (!event.id) {
+      const slug = (event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+      const dateSlug = (event.startDate || 'undated').replace(/-/g, '');
+      event.id = `crawl-${slug}-${dateSlug}`;
+    }
+
     const row = {
       id: event.id,
-      title: event.title,
+      title: event.title || 'Untitled Event',
       category: event.category || 'other',
       payload: event,
       embedding,
@@ -235,7 +245,6 @@ async function upsertEvents(events, vectors, windowEnd) {
       .upsert(row, { onConflict: 'id' });
 
     if (error) {
-      // Conflict on existing id = duplicate update (not a real error)
       if (error.code === '23505') {
         duplicates++;
       } else {
@@ -252,38 +261,43 @@ async function upsertEvents(events, vectors, windowEnd) {
 }
 
 // ─────────────────────────────────────────────
-// MAIN CRAWL FUNCTION
+// MAIN CRAWL
 // ─────────────────────────────────────────────
 
 export async function runCrawl() {
   const startTime = Date.now();
   const { windowStart, windowEnd } = getWindowBounds();
+  const todayStr    = formatDate(windowStart);
+  const windowEndStr = formatDate(windowEnd);
 
   console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║       Kickflip Daily Event Crawler       ║');
-  console.log(`║  ${new Date().toISOString()}   ║`);
-  console.log(`║  Window: today → +${WINDOW_DAYS} days              ║`);
-  console.log('╚══════════════════════════════════════════╝\n');
+  console.log('║       Kickflip Event Crawler             ║');
+  console.log(`║  Window: ${todayStr.slice(0,10)} → ${windowEndStr.slice(0,10)}      ║`);
+  console.log('╚══════════════════════════════════════════╝');
 
-  // Step 1: Fetch all sources in parallel
-  console.log('📡 STEP 1: Fetching sources...');
-  const rawResults = (await Promise.all(SOURCES.map(fetchSource))).filter(Boolean);
-  console.log(`  → ${rawResults.length}/${SOURCES.length} sources returned data\n`);
+  // Step 1: Run all searches (sequentially to avoid rate limits)
+  console.log('\n🔍 STEP 1: Searching for Seattle events via Claude web_search...');
+  const searches = buildSearches(todayStr, windowEndStr);
+  let allCandidates = [];
 
-  if (rawResults.length === 0) {
-    return { eventsFound: 0, eventsFiltered: 0, eventsStored: 0, duplicates: 0, errors: 0, sourcesFetched: 0, durationMs: Date.now() - startTime };
+  for (const search of searches) {
+    const results = await searchWithClaude(search);
+    allCandidates.push(...results);
   }
 
-  // Step 2: Claude structures all sources in 1 LLM call
-  console.log('🤖 STEP 2: Structuring with Claude...');
-  const candidates = await structureWithClaude(rawResults, windowStart, windowEnd);
+  console.log(`\n  → Total candidates across all searches: ${allCandidates.length}`);
 
-  // Step 3: Filter — keep only future events within 7-day window
+  // Step 2: Deduplicate
+  console.log('\n🔄 STEP 2: Deduplicating...');
+  const unique = deduplicate(allCandidates);
+  console.log(`  → ${unique.length} unique events (removed ${allCandidates.length - unique.length} duplicates)`);
+
+  // Step 3: Filter to 7-day window
   console.log('\n🗓️  STEP 3: Filtering to 7-day future window...');
   const validEvents = [];
   const rejectedEvents = [];
 
-  for (const event of candidates) {
+  for (const event of unique) {
     const { valid, reason } = isWithinWindow(event, windowStart, windowEnd);
     if (valid) {
       validEvents.push(event);
@@ -292,60 +306,62 @@ export async function runCrawl() {
     }
   }
 
-  console.log(`  → ${validEvents.length} events in window`);
-  console.log(`  → ${rejectedEvents.length} events rejected (past or too far ahead)`);
-  if (rejectedEvents.length > 0) {
-    rejectedEvents.slice(0, 5).forEach(r => console.log(r));
-    if (rejectedEvents.length > 5) console.log(`  ... and ${rejectedEvents.length - 5} more`);
+  console.log(`  → ${validEvents.length} events pass the window filter`);
+  console.log(`  → ${rejectedEvents.length} rejected`);
+  if (rejectedEvents.length > 0 && rejectedEvents.length <= 5) {
+    rejectedEvents.forEach(r => console.log(r));
   }
 
   if (validEvents.length === 0) {
-    console.log('\n⚠️  No valid events to store after filtering.');
-    return { eventsFound: candidates.length, eventsFiltered: 0, eventsStored: 0, duplicates: 0, errors: 0, sourcesFetched: rawResults.length, durationMs: Date.now() - startTime };
+    console.log('\n⚠️  No valid events to store.');
+    return {
+      eventsFound: allCandidates.length, eventsRejected: rejectedEvents.length,
+      eventsFiltered: 0, eventsStored: 0, duplicates: 0, errors: 0,
+      durationMs: Date.now() - startTime,
+    };
   }
 
-  // Step 4: Generate embeddings in batch (1 Voyage AI call)
-  console.log(`\n🧠 STEP 4: Generating embeddings for ${validEvents.length} events...`);
+  // Step 4: Generate embeddings in one batch call
+  console.log(`\n🧠 STEP 4: Generating Voyage AI embeddings for ${validEvents.length} events...`);
   const vectors = await embedBatch(validEvents);
 
   // Step 5: Upsert into Supabase
-  console.log(`\n💾 STEP 5: Storing in Supabase...`);
+  console.log(`\n💾 STEP 5: Storing ${validEvents.length} events in Supabase...`);
   const { stored, duplicates, errors, storedTitles } = await upsertEvents(validEvents, vectors, windowEnd);
 
-  // Step 6: Clean expired query cache
+  // Step 6: Clean expired cache
   console.log('\n🧹 STEP 6: Cleaning expired query cache...');
   const { error: cleanupErr } = await supabase.rpc('cleanup_expired_cache');
-  if (cleanupErr) console.warn('  ⚠️  Cache cleanup warning:', cleanupErr.message);
+  if (cleanupErr) console.warn('  ⚠️  Cache cleanup:', cleanupErr.message);
   else console.log('  ✅ Cache cleaned');
 
   const durationMs = Date.now() - startTime;
 
-  // Final report
   console.log('\n══════════════════════════════════════════');
   console.log('✅ CRAWL COMPLETE');
-  console.log(`   Sources fetched  : ${rawResults.length}/${SOURCES.length}`);
-  console.log(`   Events extracted : ${candidates.length}`);
-  console.log(`   Events rejected  : ${rejectedEvents.length} (past/out-of-window)`);
-  console.log(`   Events in window : ${validEvents.length}`);
-  console.log(`   ── Newly stored  : ${stored} (with embeddings)`);
-  console.log(`   ── Duplicates    : ${duplicates} (updated in place)`);
+  console.log(`   Searches run     : ${searches.length}`);
+  console.log(`   Events found     : ${allCandidates.length}`);
+  console.log(`   After dedupe     : ${unique.length}`);
+  console.log(`   After date filter: ${validEvents.length}`);
+  console.log(`   ── Stored new    : ${stored} (with embeddings)`);
+  console.log(`   ── Updated exist : ${duplicates}`);
   console.log(`   ── Errors        : ${errors}`);
   console.log(`   Duration         : ${(durationMs / 1000).toFixed(1)}s`);
   console.log('══════════════════════════════════════════');
 
   if (storedTitles.length > 0) {
-    console.log('\n📋 New events stored:');
+    console.log('\n📋 Events stored in Supabase:');
     storedTitles.forEach(t => console.log(t));
   }
 
   return {
-    eventsFound: candidates.length,
+    eventsFound: allCandidates.length,
+    eventsUnique: unique.length,
     eventsRejected: rejectedEvents.length,
     eventsFiltered: validEvents.length,
     eventsStored: stored,
     duplicates,
     errors,
-    sourcesFetched: rawResults.length,
     durationMs,
     storedEvents: storedTitles,
   };
