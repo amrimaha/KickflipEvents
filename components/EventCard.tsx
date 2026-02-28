@@ -37,6 +37,7 @@ export const EventCard: React.FC<EventCardProps> = ({
 }) => {
   const [showInfo, setShowInfo] = useState(false);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   // Track failed videos to hide them
   const [failedVideos, setFailedVideos] = useState<Set<string>>(new Set());
 
@@ -523,108 +524,168 @@ export const EventCard: React.FC<EventCardProps> = ({
   // --- DEFAULT CARD VARIANT ---
   return (
     <>
-      <div 
-        className={`relative flex-shrink-0 rounded-2xl overflow-hidden cursor-pointer group transition-all hover:scale-[1.02] active:scale-[0.98] bg-gray-900 ${className || 'w-[280px] h-[500px]'}`}
+      <div
+        className={className || ''}
+        style={{
+          width: className ? undefined : '300px',
+          background: '#111113',
+          borderRadius: '16px',
+          border: isHovered ? `1px solid ${categoryColor}` : '1px solid rgba(255,255,255,0.08)',
+          boxShadow: isHovered
+            ? `0 8px 32px rgba(0,0,0,0.4), 0 0 20px ${categoryColor}40`
+            : '0 2px 8px rgba(0,0,0,0.3)',
+          overflow: 'hidden',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          flexShrink: 0,
+          transform: isHovered ? 'scale(1.02)' : 'scale(1)',
+          position: 'relative',
+        }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         onClick={handleClick}
       >
-        <div className="absolute inset-0 z-0 bg-gray-800">
-           {renderMediaContent(false)}
-        </div>
-        
-        {renderArrows(true)}
-        {renderDots()}
-
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-10 pointer-events-none" />
-
-        {actionSlot && (
-            <div className="absolute top-4 right-4 z-50" onClick={(e) => e.stopPropagation()}>
-                {actionSlot}
-            </div>
-        )}
-
-        {isSuperAdmin && onEdit && !actionSlot && (
-            <button 
-                onClick={(e) => { e.stopPropagation(); onEdit(event); }}
-                className="absolute top-4 right-4 z-50 p-2 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-xl border border-red-400/50 hover:bg-red-500 hover:scale-105 transition-all"
-            >
-                Edit
-            </button>
-        )}
-
-        <div className="absolute top-4 left-4 z-20 pointer-events-none">
-          <span 
-            className="px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider text-black shadow-lg"
-            style={{ backgroundColor: categoryColor }}
-          >
-            {event.category}
-          </span>
-        </div>
-
-        {event.price && !isSuperAdmin && !actionSlot && (
-          <div className="absolute top-4 right-4 z-20 pointer-events-none">
-             <span className="px-3 py-1 rounded-md text-xs font-bold backdrop-blur-md text-white border border-white/20 shadow-lg bg-black/40">
-               {event.price}
-             </span>
+        {/* Image area — 16:9 ratio via padding trick */}
+        <div style={{ position: 'relative', paddingBottom: '62%', overflow: 'hidden', background: '#1a1a1c' }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
+            {renderMediaContent(false)}
           </div>
-        )}
-        
-        <div className="absolute bottom-0 left-0 w-full p-5 z-20 flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2 mb-1 pointer-events-auto">
+
+          {renderArrows(true)}
+          {renderDots()}
+
+          {/* Gradient fade at bottom of image */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%',
+            background: 'linear-gradient(to top, rgba(17,17,19,0.75), transparent)',
+            pointerEvents: 'none', zIndex: 10,
+          }} />
+
+          {/* Category badge */}
+          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 20 }}>
+            <span style={{
+              backgroundColor: categoryColor,
+              padding: '3px 8px', borderRadius: '6px',
+              fontSize: '10px', fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.06em', color: '#000',
+            }}>
+              {event.category}
+            </span>
+          </div>
+
+          {/* Price badge */}
+          {event.price && !isSuperAdmin && !actionSlot && (
+            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 20 }}>
+              <span style={{
+                padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700,
+                color: 'rgba(255,255,255,0.9)', background: 'rgba(0,0,0,0.55)',
+                border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)',
+              }}>
+                {event.price}
+              </span>
+            </div>
+          )}
+
+          {/* Action slot */}
+          {actionSlot && (
+            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }} onClick={(e) => e.stopPropagation()}>
+              {actionSlot}
+            </div>
+          )}
+
+          {/* Admin edit button */}
+          {isSuperAdmin && onEdit && !actionSlot && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(event); }}
+              style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }}
+              className="p-2 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-xl border border-red-400/50 hover:bg-red-500 transition-colors"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+
+        {/* Content below image */}
+        <div style={{ padding: '12px 14px 14px' }}>
+          {/* Vibe tags */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
             {event.vibeTags.slice(0, 3).map((tag, i) => (
               <button
                 key={i}
                 onClick={(e) => {
-                  if (onTagClick) {
-                    e.stopPropagation();
-                    onTagClick(tag);
-                  }
+                  if (onTagClick) { e.stopPropagation(); onTagClick(tag); }
                 }}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border border-white/30 backdrop-blur-sm text-white/80 transition-colors ${
-                  onTagClick ? 'hover:bg-white hover:text-black cursor-pointer' : 'cursor-default'
-                }`}
+                style={{
+                  fontSize: '10px', fontWeight: 700,
+                  padding: '2px 7px', borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  color: 'rgba(255,255,255,0.7)', background: 'transparent',
+                  cursor: onTagClick ? 'pointer' : 'default',
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                  transition: 'all 0.15s',
+                }}
               >
-                {tag}
+                #{tag}
               </button>
             ))}
           </div>
 
-          <div className="flex items-end justify-between gap-2">
-               <div>
-                    <h3 className="text-xl font-bold leading-tight text-white drop-shadow-md pointer-events-none line-clamp-2">
-                        {event.title}
-                    </h3>
-                    <p className="text-sm font-medium text-white/80 flex items-center gap-1.5 pointer-events-none mt-1">
-                        <span className="inline-block w-2 h-2 rounded-full bg-white/50" />
-                        {displayDate}
-                    </p>
-                    <p className="text-sm font-medium text-white/60 truncate pointer-events-none">
-                        @{event.city || displayLocation}
-                    </p>
-               </div>
-               
-               {event.vibemoji && (
-                   <div className="w-10 h-10 flex-shrink-0 drop-shadow-lg mb-1 pointer-events-none">
-                        <EventVibemojiRenderer config={event.vibemoji} className="w-full h-full" />
-                   </div>
-               )}
-          </div>
+          {/* Title */}
+          <h3 style={{
+            fontSize: '15px', fontWeight: 700, color: 'white', lineHeight: 1.3,
+            margin: '0 0 5px', overflow: 'hidden', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>
+            {event.title}
+          </h3>
+
+          {/* Date */}
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', margin: '0 0 2px', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+            {displayDate}
+          </p>
+
+          {/* Location */}
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.42)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            @{event.city || displayLocation}
+          </p>
+
+          {/* Vibemoji */}
+          {event.vibemoji && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+              <div style={{ width: 30, height: 30 }}>
+                <EventVibemojiRenderer config={event.vibemoji} className="w-full h-full" />
+              </div>
+            </div>
+          )}
 
           {extraContent && (
-             <div className="mt-2 pt-2 border-t border-white/10">
-                 {extraContent}
-             </div>
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              {extraContent}
+            </div>
           )}
         </div>
       </div>
 
       {!onClick && showInfo && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
-          <div 
-             className="absolute inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
-             onClick={() => setShowInfo(false)}
+        <div className="fixed inset-0 z-[100]">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/85 backdrop-blur-md animate-in fade-in duration-300"
+            onClick={() => setShowInfo(false)}
           />
-          <div className="relative w-full max-w-2xl z-10 h-[80vh]">
-             {renderDetailContent()}
+          {/* Mobile: slide up from bottom */}
+          <div className="md:hidden absolute bottom-0 left-0 right-0 max-h-[90vh] rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom duration-300">
+            {renderDetailContent()}
+          </div>
+          {/* Desktop: centered modal */}
+          <div className="hidden md:flex absolute inset-0 items-center justify-center p-6" onClick={() => setShowInfo(false)}>
+            <div
+              className="relative w-full max-w-2xl h-[80vh] animate-in zoom-in-95 duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {renderDetailContent()}
+            </div>
           </div>
         </div>,
         document.body
