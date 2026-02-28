@@ -1122,22 +1122,77 @@ const App: React.FC = () => {
 
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
         {/* Persistent Top Navigation */}
-        <header className="sticky top-0 z-50 p-6 w-full flex justify-between items-start transition-all">
-          <div className="flex items-center gap-4">
-             <button onClick={() => setIsDrawerOpen(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-             </button>
-             <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
-                <div className="flex flex-col">
-                    <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">BETA</span>
-                </div>
-             </div>
+        <header className="sticky top-0 z-50 w-full transition-all flex flex-col">
+          {/* Top nav row */}
+          <div className="flex justify-between items-start p-6">
+            <div className="flex items-center gap-4">
+               <button onClick={() => setIsDrawerOpen(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+               </button>
+               <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
+                  <div className="flex flex-col">
+                      <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">BETA</span>
+                  </div>
+               </div>
+            </div>
+            <div className="relative z-50 flex items-center gap-4 pt-4 pr-2">
+              <ThemeWidget currentTheme={theme} onUpdate={setTheme} />
+              <a href="https://www.instagram.com/kickflip_experience/" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity" style={{ color: theme.accentColor }}><InstagramIcon /></a>
+            </div>
           </div>
-          <div className="relative z-50 flex items-center gap-4 pt-4 pr-2">
-            <ThemeWidget currentTheme={theme} onUpdate={setTheme} />
-            <a href="https://www.instagram.com/kickflip_experience/" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity" style={{ color: theme.accentColor }}><InstagramIcon /></a>
-          </div>
+
+          {/* Sticky combined filter bar — categories + day tabs in one row */}
+          {isHome && (
+            <div className="flex items-center gap-1.5 px-4 pb-3 overflow-x-auto no-scrollbar bg-black/80 backdrop-blur-lg border-t border-white/10">
+              {/* Category: All */}
+              <button
+                onClick={() => setFilterCategory('all')}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
+                  filterCategory === 'all' ? 'bg-white text-black' : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                All{categoryCounts.all > 0 ? <span className="ml-1 font-normal opacity-70">{categoryCounts.all}</span> : null}
+              </button>
+              {/* Category buttons */}
+              {Object.keys(CATEGORY_COLORS).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setFilterCategory(cat === filterCategory ? 'all' : cat)}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all"
+                  style={{
+                    backgroundColor: filterCategory === cat ? CATEGORY_COLORS[cat] : 'transparent',
+                    border: `1px solid ${filterCategory === cat ? CATEGORY_COLORS[cat] : 'rgba(255,255,255,0.15)'}`,
+                    color: filterCategory === cat ? '#000' : 'rgba(255,255,255,0.6)',
+                  }}
+                >
+                  {cat}{categoryCounts[cat] ? <span className="ml-1 font-normal opacity-70">{categoryCounts[cat]}</span> : null}
+                </button>
+              ))}
+              {/* Divider */}
+              <div className="w-px h-5 bg-white/20 mx-1 flex-shrink-0" />
+              {/* Day tabs */}
+              {dayTabs.map((tab, idx) => {
+                const isActive = tab.date === null
+                  ? (filterTime === 'all' || filterTime === 'tonight' || filterTime === 'weekend')
+                  : filterTime === 'custom' && selectedDate?.toDateString() === tab.date.toDateString();
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (tab.date === null) { setFilterTime('all'); setSelectedDate(null); }
+                      else { setFilterTime('custom'); setSelectedDate(tab.date); }
+                    }}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                      isActive ? 'bg-white text-black shadow' : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {tab.label}{!isActive && tab.count > 0 ? <span className="ml-1 font-normal opacity-50">{tab.count}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </header>
 
         <div className={`flex flex-col gap-2 px-6 transition-all duration-700 ${isHome ? 'min-h-[60vh] justify-center' : 'pt-0'}`}>
@@ -1176,8 +1231,7 @@ const App: React.FC = () => {
                   className="flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg"
                   style={{ backgroundColor: theme.accentColor, color: '#000', boxShadow: `0 0 16px ${theme.accentColor}60` }}
                 >
-                  <span>🗓️</span>
-                  Plan my weekend
+                  + Plan my weekend
                 </button>
                 {suggestionChips.map((chip, index) => (
                   <button
@@ -1194,75 +1248,15 @@ const App: React.FC = () => {
                     <h3 className="text-xl font-bold uppercase tracking-widest text-white/50 mb-4">Featured Events</h3>
                 </div>
 
-                <div className="mb-6 border-b border-white/10 pb-4">
-                    {/* Day-of-week tabs — kickflip-psi style */}
-                    <div className="flex gap-1 overflow-x-auto no-scrollbar bg-white/5 rounded-lg p-1 w-fit max-w-full">
-                      {dayTabs.map((tab, idx) => {
-                        const isActive = tab.date === null
-                          ? (filterTime === 'all' || filterTime === 'tonight' || filterTime === 'weekend')
-                          : filterTime === 'custom' && selectedDate?.toDateString() === tab.date.toDateString();
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              if (tab.date === null) {
-                                setFilterTime('all'); setSelectedDate(null);
-                              } else {
-                                setFilterTime('custom'); setSelectedDate(tab.date);
-                              }
-                            }}
-                            className={`flex-shrink-0 px-3 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
-                              isActive ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white hover:bg-white/10'
-                            }`}
-                          >
-                            {tab.label}
-                            {!isActive && tab.count > 0 && (
-                              <span className="ml-1 opacity-50 font-normal">{tab.count}</span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {filterVibe && (
-                      <div className="flex items-center gap-2 px-4 py-2 mt-3 rounded-full bg-white/10 border border-white/20 animate-in fade-in w-fit">
-                          <span className="text-xs text-white/60 uppercase font-bold">Vibe:</span>
-                          <span className="text-sm font-bold text-white">#{filterVibe}</span>
-                          <button onClick={() => setFilterVibe('')} className="p-0.5 rounded-full hover:bg-white/20 text-white/50 hover:text-white">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                          </button>
-                      </div>
-                    )}
-
-                    {/* Category tabs with event counts */}
-                    <div className="flex gap-2 mt-4 justify-start overflow-x-auto no-scrollbar pb-2 snap-x">
-                      <button
-                        onClick={() => setFilterCategory('all')}
-                        className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start ${
-                          filterCategory === 'all'
-                            ? 'bg-white text-black border-white'
-                            : 'bg-transparent text-white/60 border-white/20 hover:border-white hover:text-white'
-                        }`}
-                      >
-                        All {categoryCounts.all > 0 && <span className="ml-1 opacity-60 font-normal">{categoryCounts.all}</span>}
-                      </button>
-                      {Object.keys(CATEGORY_COLORS).map(cat => (
-                        <button
-                          key={cat}
-                          onClick={() => setFilterCategory(cat)}
-                          className="flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start"
-                          style={{
-                            backgroundColor: filterCategory === cat ? CATEGORY_COLORS[cat] : 'transparent',
-                            borderColor: CATEGORY_COLORS[cat],
-                            color: filterCategory === cat ? '#000' : 'white',
-                            opacity: filterCategory === 'all' || filterCategory === cat ? 1 : 0.6
-                          }}
-                        >
-                          {cat}{categoryCounts[cat] ? <span className="ml-1 opacity-60 font-normal">{categoryCounts[cat]}</span> : null}
-                        </button>
-                      ))}
-                    </div>
-                </div>
+                {filterVibe && (
+                  <div className="flex items-center gap-2 px-4 py-2 mb-4 rounded-full bg-white/10 border border-white/20 animate-in fade-in w-fit">
+                    <span className="text-xs text-white/60 uppercase font-bold">Vibe:</span>
+                    <span className="text-sm font-bold text-white">#{filterVibe}</span>
+                    <button onClick={() => setFilterVibe('')} className="p-0.5 rounded-full hover:bg-white/20 text-white/50 hover:text-white">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-32">
                   {filteredEvents.length > 0 ? (
