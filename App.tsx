@@ -398,6 +398,7 @@ const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const latestUserMessageRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const getHistoryKey = (u: User | null) => u ? `kickflip_history_${u.id}` : 'kickflip_history_guest';
   const isSuperAdmin = user?.email === 'bryce@kickflip.co';
@@ -557,6 +558,36 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('kickflip_theme', JSON.stringify(theme));
   }, [theme]);
+
+  // Background music player — plays/switches/stops when theme.music changes
+  useEffect(() => {
+    const trackUrl = theme.music ?? null;
+
+    if (!trackUrl) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      return;
+    }
+
+    // Same track already playing — do nothing
+    if (audioRef.current && audioRef.current.src === trackUrl) return;
+
+    // Switch to new track
+    if (audioRef.current) audioRef.current.pause();
+    const audio = new Audio(trackUrl);
+    audio.loop = true;
+    audio.volume = 0.25;
+    audio.play().catch(() => {
+      // Autoplay blocked until user interaction — silently ignore
+    });
+    audioRef.current = audio;
+
+    return () => {
+      audio.pause();
+    };
+  }, [theme.music]);
 
   useEffect(() => {
     try {

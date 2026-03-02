@@ -34,13 +34,59 @@ export const HERO_VIDEOS = [
 ];
 
 export const BACKGROUND_OPTIONS = [
-  { label: 'City Life', type: 'video', url: 'https://videos.pexels.com/video-files/3121459/3121459-hd_1920_1080_24fps.mp4' },
-  { label: 'Night Sky', type: 'image', url: 'https://images.pexels.com/photos/1624496/pexels-photo-1624496.jpeg' },
-  { label: 'History Lesson', type: 'image', url: 'https://images.pexels.com/photos/2225439/pexels-photo-2225439.jpeg' },
-  { label: 'Video Game', type: 'image', url: 'https://images.pexels.com/photos/3165335/pexels-photo-3165335.jpeg' },
-  { label: 'Urban Legend', type: 'image', url: 'https://images.pexels.com/photos/7130498/pexels-photo-7130498.jpeg' },
-  { label: 'Misty Forest', type: 'image', url: 'https://images.pexels.com/photos/167699/pexels-photo-167699.jpeg' }
-] as const;
+  {
+    label: 'Seattle Skyline',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?auto=format&fit=crop&w=2560&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'City Life',
+    type: 'video',
+    url: 'https://videos.pexels.com/video-files/3121459/3121459-hd_1920_1080_24fps.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'Night Sky',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=2560&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'History Lesson',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?auto=format&fit=crop&w=2560&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'Video Game',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=2560&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'Urban Legend',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?auto=format&fit=crop&w=2560&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?auto=format&fit=crop&w=400&q=60',
+  },
+  {
+    label: 'Misty Forest',
+    type: 'image',
+    url: 'https://images.pexels.com/photos/167699/pexels-photo-167699.jpeg',
+    thumbnail: 'https://images.pexels.com/photos/167699/pexels-photo-167699.jpeg?w=400',
+  },
+];
+
+export const MUSIC_OPTIONS = [
+  { label: 'Off', url: null },
+  { label: 'City Pulse',       url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+  { label: 'Neon Nights',      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
+  { label: 'Rooftop Vibes',    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
+  { label: 'Late Night Drive', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' },
+  { label: 'Underground Beats',url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3' },
+  { label: 'Golden Hour',      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3' },
+];
 
 export const BRAND_COLORS = [
   '#ec4899', // Pink

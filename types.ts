@@ -91,6 +91,7 @@ export interface ThemeConfig {
   backgroundType: 'video' | 'image';
   backgroundUrl: string;
   vibemoji: string; // id of the selected emoji
+  music?: string | null; // URL of background music track, null = off
 }
 
 // --- NEW TYPES FOR CREATION FLOW ---
