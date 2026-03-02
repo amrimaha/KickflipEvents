@@ -1,7 +1,6 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { User, EventDraft, VibemojiConfig, KickflipEvent } from '../types';
-import { EventVibemojiRenderer } from './EventVibemojiRenderer';
 import { EventCard } from './EventCard';
 import { IdentityCustomizer } from './IdentityCustomizer';
 import { draftToEvent } from '../constants';
@@ -38,6 +37,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   
   const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        onUpdateUser({ profilePhotoUrl: ev.target?.result as string });
+      };
+      reader.readAsDataURL(e.target.files[0]);
+    }
+  };
+
+  // Resolved avatar: uploaded photo → Google account photo → initials
+  const avatarUrl = user.profilePhotoUrl || user.avatar || null;
+  const initials = user.name
+    .split(' ')
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   // Filter events
   const { upcoming, past } = useMemo(() => {
@@ -177,15 +196,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </button>
           <input type="file" ref={coverInputRef} className="hidden" accept="image/*,video/*" onChange={handleCoverUpload} />
 
-          {/* Avatar / Vibemoji */}
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-12 z-30 flex flex-col items-center">
-              <div className="w-32 h-32 rounded-[2.5rem] bg-black border-4 border-[#111] shadow-2xl overflow-hidden relative group/avatar cursor-pointer" onClick={() => setIsIdentityModalOpen(true)}>
-                 <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
-                 <EventVibemojiRenderer config={brandIdentity} className="w-full h-full p-2 group-hover/avatar:scale-110 transition-transform duration-500" />
-                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-opacity">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                 </div>
+          {/* Avatar — click to upload photo */}
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-12 z-30">
+              <div
+                className="w-32 h-32 rounded-full bg-black border-4 shadow-2xl overflow-hidden relative group/avatar cursor-pointer"
+                style={{ borderColor: accentColor }}
+                onClick={() => avatarInputRef.current?.click()}
+              >
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={user.name}
+                    className="w-full h-full object-cover group-hover/avatar:scale-105 transition-transform duration-300"
+                  />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-3xl font-black text-white"
+                    style={{ backgroundColor: accentColor + '33' }}
+                  >
+                    {initials}
+                  </div>
+                )}
+                {/* Camera overlay on hover */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                  <span className="text-white text-[9px] font-bold uppercase tracking-widest">Upload</span>
+                </div>
               </div>
+              <input
+                type="file"
+                ref={avatarInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+              />
           </div>
       </div>
 

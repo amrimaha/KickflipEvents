@@ -1,7 +1,6 @@
 
 import React from 'react';
 import { ChatSession, User } from '../types';
-import { VibemojiRenderer } from './Vibemojis';
 import { ADMIN_EMAILS } from '../constants';
 import { isBackendConfigured } from '../services/supabaseClient';
 
@@ -70,15 +69,24 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                className="flex flex-col gap-4 cursor-pointer hover:bg-white/5 -m-4 p-4 rounded-xl transition-colors group"
                onClick={onNavigateProfile}
             >
-              <div 
-                className="relative w-16 h-16 rounded-full border-2 bg-white/10 flex items-center justify-center overflow-hidden shadow-lg transition-colors group-hover:border-white/40"
+              <div
+                className="relative w-16 h-16 rounded-full border-2 overflow-hidden shadow-lg transition-colors group-hover:border-white/40 flex-shrink-0"
                 style={{ borderColor: accentColor }}
               >
-                 {/* Only use Vibemoji for profile for now per previous instruction */}
-                 <VibemojiRenderer 
-                    id={vibemoji} 
-                    className="w-10 h-10 drop-shadow-md group-hover:scale-110 transition-transform"
-                 />
+                {user!.profilePhotoUrl || user!.avatar ? (
+                  <img
+                    src={user!.profilePhotoUrl || user!.avatar}
+                    alt={user!.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-xl font-black text-white"
+                    style={{ backgroundColor: accentColor + '33' }}
+                  >
+                    {user!.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
+                  </div>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-white text-xl font-bold truncate group-hover:text-pink-400 transition-colors">{user!.name}</h3>

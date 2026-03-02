@@ -63,6 +63,7 @@ export interface User {
   // Profile Fields
   phoneNumber?: string;
   profileVideoUrl?: string; // Legacy support
+  profilePhotoUrl?: string; // Uploaded avatar photo (overrides Google avatar)
   profileCoverUrl?: string; // New field for generic cover (image or video)
   profileCoverType?: 'image' | 'video'; // New field to distinguish type
   notificationPreferences?: NotificationPreferences;
