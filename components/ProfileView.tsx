@@ -41,11 +41,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        onUpdateUser({ profilePhotoUrl: ev.target?.result as string });
+      const file = e.target.files[0];
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const MAX = 400;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.82);
+        onUpdateUser({ profilePhotoUrl: compressed });
       };
-      reader.readAsDataURL(e.target.files[0]);
+      img.src = objectUrl;
     }
   };
 
@@ -106,17 +117,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
           const type = file.type.startsWith('image') ? 'image' : 'video';
-          
-          // Use FileReader to convert to Base64 Data URL for persistent storage in DB
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-              const url = ev.target?.result as string;
-              onUpdateUser({ 
-                  profileCoverUrl: url,
-                  profileCoverType: type
-              });
-          };
-          reader.readAsDataURL(file);
+
+          if (type === 'image') {
+            const img = new Image();
+            const objectUrl = URL.createObjectURL(file);
+            img.onload = () => {
+              URL.revokeObjectURL(objectUrl);
+              const MAX_W = 1280, MAX_H = 720;
+              const scale = Math.min(1, MAX_W / img.width, MAX_H / img.height);
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.round(img.width * scale);
+              canvas.height = Math.round(img.height * scale);
+              canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+              onUpdateUser({ profileCoverUrl: canvas.toDataURL('image/jpeg', 0.80), profileCoverType: 'image' });
+            };
+            img.src = objectUrl;
+          } else {
+            // Videos: store as object URL (session only — Supabase Storage needed for persistence)
+            const objectUrl = URL.createObjectURL(file);
+            onUpdateUser({ profileCoverUrl: objectUrl, profileCoverType: 'video' });
+          }
       }
   };
 
