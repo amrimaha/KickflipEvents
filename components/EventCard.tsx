@@ -519,26 +519,26 @@ export const EventCard: React.FC<EventCardProps> = ({
       <div
         className={className || ''}
         style={{
-          width: className ? undefined : '300px',
+          width: className ? undefined : '340px',
           background: '#111113',
-          borderRadius: '16px',
-          border: isHovered ? `1px solid ${categoryColor}` : '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '14px',
+          border: '1px solid rgba(255,255,255,0.07)',
           boxShadow: isHovered
-            ? `0 8px 32px rgba(0,0,0,0.4), 0 0 20px ${categoryColor}40`
-            : '0 2px 8px rgba(0,0,0,0.3)',
+            ? '0 16px 48px rgba(0,0,0,0.55)'
+            : '0 2px 10px rgba(0,0,0,0.3)',
           overflow: 'hidden',
           cursor: 'pointer',
           transition: 'all 0.2s ease',
           flexShrink: 0,
-          transform: isHovered ? 'scale(1.02)' : 'scale(1)',
+          transform: isHovered ? 'translateY(-3px)' : 'translateY(0)',
           position: 'relative',
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={handleClick}
       >
-        {/* Image area — 16:9 ratio via padding trick */}
-        <div style={{ position: 'relative', paddingBottom: '62%', overflow: 'hidden', background: '#1a1a1c' }}>
+        {/* Image area */}
+        <div style={{ position: 'relative', paddingBottom: '57%', overflow: 'hidden', background: '#1a1a1c' }}>
           <div style={{ position: 'absolute', inset: 0 }}>
             {renderMediaContent(false)}
           </div>

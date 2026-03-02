@@ -1180,12 +1180,12 @@ const App: React.FC = () => {
               {msg.events && msg.events.length > 0 && (
                 <div className="w-full mt-12 mb-4 animate-in slide-in-from-bottom-10 fade-in duration-700">
                   <div className="flex gap-4 overflow-x-auto no-scrollbar pb-8 snap-x snap-mandatory pl-1">
-                    {msg.events.map((event, i) => (
+                    {msg.events.map((event) => (
                       <EventCard 
                         key={event.id} 
                         event={event} 
                         theme={theme} 
-                        className={`${i % 3 === 0 ? 'w-[320px] sm:w-[360px]' : 'w-[300px] sm:w-[320px]'}`}
+                        className="w-[340px] sm:w-[380px]"
                         onTagClick={handleTagClick}
                         isSuperAdmin={isSuperAdmin}
                         onEdit={handleAdminEdit}
