@@ -1289,7 +1289,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-32">
+                <div className="grid gap-4 pb-32" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
                   {filteredEvents.length > 0 ? (
                     filteredEvents.map((event) => (
                       <div key={event.id}>

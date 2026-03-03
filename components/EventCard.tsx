@@ -513,137 +513,106 @@ export const EventCard: React.FC<EventCardProps> = ({
     );
   }
 
-  // --- DEFAULT CARD VARIANT ---
+  // --- DEFAULT CARD VARIANT (Bryce-matched: full-bleed image, fixed height, text overlay) ---
   return (
     <>
       <div
         className={className || ''}
         style={{
-          width: className ? undefined : '340px',
-          background: '#111113',
+          height: '270px',
           borderRadius: '14px',
-          border: '1px solid rgba(255,255,255,0.07)',
-          boxShadow: isHovered
-            ? '0 16px 48px rgba(0,0,0,0.55)'
-            : '0 2px 10px rgba(0,0,0,0.3)',
+          boxShadow: isHovered ? '0 8px 32px rgba(0,0,0,0.6)' : '0 4px 24px rgba(0,0,0,0.5)',
           overflow: 'hidden',
           cursor: 'pointer',
           transition: 'all 0.2s ease',
           flexShrink: 0,
-          transform: isHovered ? 'translateY(-3px)' : 'translateY(0)',
+          transform: isHovered ? 'translateY(-4px)' : 'translateY(0)',
           position: 'relative',
+          background: '#1a1a1c',
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={handleClick}
       >
-        {/* Image area */}
-        <div style={{ position: 'relative', paddingBottom: '57%', overflow: 'hidden', background: '#1a1a1c' }}>
-          <div style={{ position: 'absolute', inset: 0 }}>
-            {renderMediaContent(false)}
-          </div>
-
-          {renderArrows(true)}
-          {renderDots()}
-
-          {/* Gradient fade at bottom of image */}
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%',
-            background: 'linear-gradient(to top, rgba(17,17,19,0.75), transparent)',
-            pointerEvents: 'none', zIndex: 10,
-          }} />
-
-          {/* Category badge */}
-          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 20 }}>
-            <span style={{
-              backgroundColor: categoryColor,
-              padding: '3px 8px', borderRadius: '6px',
-              fontSize: '10px', fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '0.06em', color: '#000',
-            }}>
-              {event.category}
-            </span>
-          </div>
-
-          {/* Price badge */}
-          {event.price && !isSuperAdmin && !actionSlot && (
-            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 20 }}>
-              <span style={{
-                padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700,
-                color: 'rgba(255,255,255,0.9)', background: 'rgba(0,0,0,0.55)',
-                border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)',
-              }}>
-                {event.price}
-              </span>
-            </div>
-          )}
-
-          {/* Action slot */}
-          {actionSlot && (
-            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }} onClick={(e) => e.stopPropagation()}>
-              {actionSlot}
-            </div>
-          )}
-
-          {/* Admin edit button */}
-          {isSuperAdmin && onEdit && !actionSlot && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(event); }}
-              style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }}
-              className="p-2 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-xl border border-red-400/50 hover:bg-red-500 transition-colors"
-            >
-              Edit
-            </button>
-          )}
+        {/* Full-bleed image fills entire card */}
+        <div style={{ position: 'absolute', inset: 0 }}>
+          {renderMediaContent(false)}
         </div>
 
-        {/* Content below image */}
-        <div style={{ padding: '12px 14px 14px' }}>
-          {/* Vibe tags */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-            {event.vibeTags.slice(0, 3).map((tag, i) => (
-              <button
-                key={i}
-                onClick={(e) => {
-                  if (onTagClick) { e.stopPropagation(); onTagClick(tag); }
-                }}
-                style={{
-                  fontSize: '10px', fontWeight: 700,
-                  padding: '2px 7px', borderRadius: '4px',
-                  border: '1px solid rgba(255,255,255,0.22)',
-                  color: 'rgba(255,255,255,0.7)', background: 'transparent',
-                  cursor: onTagClick ? 'pointer' : 'default',
-                  textTransform: 'uppercase', letterSpacing: '0.04em',
-                  transition: 'all 0.15s',
-                }}
-              >
-                #{tag}
-              </button>
-            ))}
-          </div>
+        {renderArrows(true)}
+        {renderDots()}
 
-          {/* Title */}
+        {/* Gradient overlay — strong at bottom for text legibility */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.35) 45%, transparent 100%)',
+          pointerEvents: 'none', zIndex: 10,
+        }} />
+
+        {/* Category badge — top left */}
+        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 20 }}>
+          <span style={{
+            backgroundColor: categoryColor,
+            padding: '3px 8px', borderRadius: '6px',
+            fontSize: '10px', fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.06em', color: '#000',
+          }}>
+            {event.category}
+          </span>
+        </div>
+
+        {/* Price badge — top right */}
+        {event.price && !isSuperAdmin && !actionSlot && (
+          <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 20 }}>
+            <span style={{
+              padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700,
+              color: 'rgba(255,255,255,0.95)', background: 'rgba(0,0,0,0.55)',
+              border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)',
+            }}>
+              {event.price}
+            </span>
+          </div>
+        )}
+
+        {/* Action slot */}
+        {actionSlot && (
+          <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }} onClick={(e) => e.stopPropagation()}>
+            {actionSlot}
+          </div>
+        )}
+
+        {/* Admin edit button */}
+        {isSuperAdmin && onEdit && !actionSlot && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(event); }}
+            style={{ position: 'absolute', top: 10, right: 10, zIndex: 50 }}
+            className="p-2 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-xl border border-red-400/50 hover:bg-red-500 transition-colors"
+          >
+            Edit
+          </button>
+        )}
+
+        {/* Text overlay — bottom of card */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          padding: '14px 14px 14px',
+          zIndex: 20,
+        }}>
           <h3 style={{
-            fontSize: '15px', fontWeight: 700, color: 'white', lineHeight: 1.3,
+            fontSize: '16px', fontWeight: 800, color: 'white', lineHeight: 1.25,
             margin: '0 0 5px', overflow: 'hidden', display: '-webkit-box',
             WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           }}>
             {event.title}
           </h3>
-
-          {/* Date */}
-          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', margin: '0 0 2px', display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+          <p style={{ fontSize: '12px', color: '#4ade80', margin: '0 0 2px', fontWeight: 600 }}>
             {displayDate}
           </p>
-
-          {/* Location */}
-          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.42)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            @{event.city || displayLocation}
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {event.city || displayLocation}
           </p>
-
           {extraContent && (
-            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ marginTop: 8 }}>
               {extraContent}
             </div>
           )}
