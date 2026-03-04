@@ -564,7 +564,7 @@ export const EventCard: React.FC<EventCardProps> = ({
         className={className || ''}
         style={{
           height: '270px',
-          borderRadius: '14px',
+          borderRadius: '10px',
           boxShadow: isHovered ? '0 8px 32px rgba(0,0,0,0.6)' : '0 4px 24px rgba(0,0,0,0.5)',
           overflow: 'hidden',
           cursor: 'pointer',

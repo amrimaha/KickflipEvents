@@ -1164,7 +1164,7 @@ const App: React.FC = () => {
 
       <VideoBackground key={theme.backgroundUrl} src={theme.backgroundUrl} type={theme.backgroundType} isOverlayDark={currentEvents.length > 0 || messages.length > 1} />
 
-      <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
+      <div className="relative z-10 w-full flex flex-col pb-64">
         {/* Persistent Top Navigation */}
         <header className={`sticky top-0 z-50 w-full transition-all duration-300 ${isScrolled ? 'bg-black/70 backdrop-blur-xl border-b border-white/10' : ''}`}>
           {/* Normal nav — logo + settings + instagram */}
@@ -1334,7 +1334,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid gap-4 pb-32" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 pb-32">
                   {filteredEvents.length > 0 ? (
                     filteredEvents.map((event) => (
                       <div key={event.id}>
