@@ -37,8 +37,18 @@ export const EventCard: React.FC<EventCardProps> = ({
   const [showInfo, setShowInfo] = useState(false);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  // Track failed videos to hide them
   const [failedVideos, setFailedVideos] = useState<Set<string>>(new Set());
+
+  // Saved state — persisted in localStorage keyed by event id
+  const savedKey = `kickflip_saved_${event.id}`;
+  const [isSaved, setIsSaved] = useState(() => localStorage.getItem(savedKey) === '1');
+  const handleToggleSave = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = !isSaved;
+    setIsSaved(next);
+    if (next) localStorage.setItem(savedKey, '1');
+    else localStorage.removeItem(savedKey);
+  };
 
   // --- URL SYNCHRONIZATION ---
   useEffect(() => {
@@ -362,11 +372,22 @@ export const EventCard: React.FC<EventCardProps> = ({
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
 
-                 <button 
+                 <button
                  onClick={(e) => handleShare(e)}
                  className="absolute top-4 right-16 z-50 p-2 rounded-full bg-black/40 text-white hover:bg-black/60 transition-colors backdrop-blur-md border border-white/10"
                  >
                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                 </button>
+
+                 <button
+                 onClick={handleToggleSave}
+                 title={isSaved ? 'Saved' : 'Save event'}
+                 className="absolute top-4 right-[7rem] z-50 p-2 rounded-full bg-black/40 hover:bg-black/60 transition-colors backdrop-blur-md border border-white/10"
+                 style={{ color: isSaved ? '#4ade80' : 'white' }}
+                 >
+                 <svg width="24" height="24" viewBox="0 0 24 24" fill={isSaved ? '#4ade80' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                 </svg>
                  </button>
             </>
         )}
