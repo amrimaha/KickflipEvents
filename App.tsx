@@ -396,6 +396,7 @@ const App: React.FC = () => {
   const [filterVibe, setFilterVibe] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showStickyFilter, setShowStickyFilter] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
 
   const latestUserMessageRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -620,12 +621,13 @@ const App: React.FC = () => {
     localStorage.setItem(key, JSON.stringify(chatHistory));
   }, [chatHistory, user]);
 
-  // Show sticky category filter bar when user scrolls past the featured events heading
+  // Track scroll to: (a) add backdrop to header, (b) swap to category filter bar
   useEffect(() => {
     const handleScroll = () => {
+      const y = window.scrollY;
+      setIsScrolled(y > 10);
       const el = document.getElementById('featured-drops');
-      if (!el) { setShowStickyFilter(false); return; }
-      setShowStickyFilter(el.getBoundingClientRect().top < 0);
+      setShowStickyFilter(!!el && el.getBoundingClientRect().top < 0);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
@@ -1164,7 +1166,7 @@ const App: React.FC = () => {
 
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
         {/* Persistent Top Navigation */}
-        <header className="sticky top-0 z-50 w-full transition-all duration-300">
+        <header className={`sticky top-0 z-50 w-full transition-all duration-300 ${isScrolled ? 'bg-black/70 backdrop-blur-xl border-b border-white/10' : ''}`}>
           {/* Normal nav — logo + settings + instagram */}
           <div className={`flex justify-between items-start p-6 transition-all duration-300 ${showStickyFilter ? 'opacity-0 pointer-events-none h-0 overflow-hidden p-0' : 'opacity-100'}`}>
             <div className="flex items-center gap-4">
