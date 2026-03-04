@@ -394,8 +394,8 @@ const App: React.FC = () => {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterTime, setFilterTime] = useState<'all' | 'tonight' | 'weekend' | 'custom'>('all');
   const [filterVibe, setFilterVibe] = useState<string>('');
-  
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showStickyFilter, setShowStickyFilter] = useState(false);
 
   const latestUserMessageRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -619,6 +619,17 @@ const App: React.FC = () => {
     const key = getHistoryKey(user);
     localStorage.setItem(key, JSON.stringify(chatHistory));
   }, [chatHistory, user]);
+
+  // Show sticky category filter bar when user scrolls past the featured events heading
+  useEffect(() => {
+    const handleScroll = () => {
+      const el = document.getElementById('featured-drops');
+      if (!el) { setShowStickyFilter(false); return; }
+      setShowStickyFilter(el.getBoundingClientRect().top < 0);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleGoogleLogin = () => {
     if (window.google && window.google.accounts) {
@@ -1153,21 +1164,53 @@ const App: React.FC = () => {
 
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col pb-64">
         {/* Persistent Top Navigation */}
-        <header className="sticky top-0 z-50 p-6 w-full flex justify-between items-start transition-all">
-          <div className="flex items-center gap-4">
-             <button onClick={() => setIsDrawerOpen(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-             </button>
-             <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
-                <div className="flex flex-col">
-                    <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">BETA</span>
-                </div>
-             </div>
+        <header className="sticky top-0 z-50 w-full transition-all duration-300">
+          {/* Normal nav — logo + settings + instagram */}
+          <div className={`flex justify-between items-start p-6 transition-all duration-300 ${showStickyFilter ? 'opacity-0 pointer-events-none h-0 overflow-hidden p-0' : 'opacity-100'}`}>
+            <div className="flex items-center gap-4">
+               <button onClick={() => setIsDrawerOpen(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+               </button>
+               <div className="relative z-50 cursor-pointer active:scale-95 transition-transform flex items-center gap-3" onClick={startNewChat}>
+                  <div className="flex flex-col">
+                      <span className="text-3xl md:text-4xl font-black tracking-tighter text-white drop-shadow-md leading-none">Kickflip</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/50 ml-1">BETA</span>
+                  </div>
+               </div>
+            </div>
+            <div className="relative z-50 flex items-center gap-4 pt-4 pr-2">
+              <ThemeWidget currentTheme={theme} onUpdate={setTheme} />
+              <a href="https://www.instagram.com/kickflip_experience/" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity" style={{ color: theme.accentColor }}><InstagramIcon /></a>
+            </div>
           </div>
-          <div className="relative z-50 flex items-center gap-4 pt-4 pr-2">
-            <ThemeWidget currentTheme={theme} onUpdate={setTheme} />
-            <a href="https://www.instagram.com/kickflip_experience/" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity" style={{ color: theme.accentColor }}><InstagramIcon /></a>
+
+          {/* Sticky category filter bar — visible when scrolled into events */}
+          <div className={`transition-all duration-300 ${showStickyFilter ? 'opacity-100' : 'opacity-0 pointer-events-none h-0 overflow-hidden'}`}>
+            <div className="bg-black/70 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex gap-2 overflow-x-auto no-scrollbar">
+              <button
+                onClick={() => setFilterCategory('all')}
+                className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border transition-all ${
+                  filterCategory === 'all' ? 'bg-white text-black border-white' : 'bg-transparent text-white/60 border-white/25 hover:border-white hover:text-white'
+                }`}
+              >
+                All {categoryCounts.all > 0 && <span className="ml-1 opacity-60 font-normal">{categoryCounts.all}</span>}
+              </button>
+              {Object.keys(CATEGORY_COLORS).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setFilterCategory(cat)}
+                  className="flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border transition-all"
+                  style={{
+                    backgroundColor: filterCategory === cat ? CATEGORY_COLORS[cat] : 'transparent',
+                    borderColor: CATEGORY_COLORS[cat],
+                    color: filterCategory === cat ? '#000' : 'white',
+                    opacity: filterCategory === 'all' || filterCategory === cat ? 1 : 0.55,
+                  }}
+                >
+                  {cat}{categoryCounts[cat] ? <span className="ml-1 opacity-60 font-normal">{categoryCounts[cat]}</span> : null}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
