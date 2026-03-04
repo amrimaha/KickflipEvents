@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { EventDraft, KickflipEvent, VibemojiConfig } from '../types';
 import { CATEGORY_COLORS, CATEGORY_VIDEOS_MAP, DEFAULT_INITIAL_DRAFT } from '../constants';
-import { EventVibemojiRenderer } from './EventVibemojiRenderer';
 import { EventCard } from './EventCard';
 
 interface CreateEventViewProps {
@@ -37,18 +36,6 @@ interface LocationSuggestion {
   id?: string;
 }
 
-const COLORS = ['#ec4899', '#fb923c', '#a78bfa', '#22d3ee', '#34d399', '#facc15', '#60a5fa', '#f87171'];
-const SKIN_TONES = ['#ffe0bd', '#fca5a5', '#ffcd94', '#eac086', '#d2996e', '#9f7959', '#684b39', '#3f2e26'];
-const VIBEMOJI_OPTIONS = {
-    headgear: ['none', 'beanie', 'bucket', 'cap', 'backwards', 'crown', 'halo'],
-    tops: ['none', 'tee', 'hoodie', 'jacket', 'flannel'],
-    bottoms: ['none', 'jeans', 'shorts', 'cargo', 'skirt'],
-    shoes: ['none', 'skate', 'boots', 'high-tops', 'neon'],
-    expressions: ['neutral', 'happy', 'hype', 'chill', 'wink'],
-    glasses: ['none', 'sunnies', 'retro', 'nerd', 'star'],
-    bling: ['none', 'chain', 'studs', 'hoops']
-};
-
 // Helper to format date string properly without timezone issues (prevents off-by-one error)
 const getFormattedDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -80,8 +67,6 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
   const [showPreviewMobile, setShowPreviewMobile] = useState(false);
   const [isMagicLoading, setIsMagicLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false); // New uploading state
-  const [activeTab, setActiveTab] = useState<'headgear' | 'tops' | 'bottoms' | 'shoes' | 'expressions' | 'colors' | 'skin' | 'glasses' | 'bling'>('headgear');
-  
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const autocompleteService = useRef<any>(null);
@@ -411,8 +396,6 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
       setDraft(prev => ({ ...prev, media: prev.media.filter((_, i) => i !== index) }));
   };
 
-  const updateVibemoji = (key: keyof VibemojiConfig, value: string) => setDraft(prev => ({ ...prev, vibemoji: { ...prev.vibemoji, [key]: value } }));
-
   const formatTime = (time: string) => {
       if (!time) return '';
       const [h, m] = time.split(':');
@@ -476,52 +459,9 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
               )}
            </section>
 
-           <section className="bg-white/5 p-8 rounded-[2.5rem] border border-white/10">
-              <label className="text-[10px] font-black uppercase tracking-[0.4em] mb-2 block" style={{color: draft.themeColor}}>Step 2: Brand Identity</label>
-              <div className="flex justify-center mb-10">
-                 <div className="relative w-40 h-40">
-                    <div className="absolute inset-0 bg-white/5 rounded-full blur-3xl animate-pulse" style={{backgroundColor: `${draft.themeColor}20`}}></div>
-                    <EventVibemojiRenderer config={draft.vibemoji} className="w-full h-full relative z-10" />
-                 </div>
-              </div>
-              <div className="flex border-b border-white/10 mb-8 overflow-x-auto no-scrollbar gap-6">
-                 {['headgear', 'glasses', 'bling', 'tops', 'bottoms', 'shoes', 'expressions', 'skin', 'colors'].map(tab => (
-                     <button key={tab} onClick={() => setActiveTab(tab as any)} className={`pb-3 text-[10px] font-black uppercase tracking-widest border-b-2 transition-all flex-shrink-0 ${activeTab === tab ? 'text-white border-white' : 'text-white/20 border-transparent hover:text-white/50'}`}>{tab}</button>
-                 ))}
-              </div>
-              <div className="min-h-[200px]">
-                  {activeTab === 'colors' ? (
-                      <div className="grid grid-cols-4 gap-4">
-                          {COLORS.map(color => (
-                              <button key={color} onClick={() => setDraft(prev => ({...prev, themeColor: color, vibemoji: {...prev.vibemoji, primaryColor: color}}))} className={`h-12 rounded-xl border-2 transition-all ${draft.themeColor === color ? 'border-white scale-110 shadow-2xl' : 'border-transparent opacity-40 hover:opacity-100'}`} style={{backgroundColor: color}} />
-                          ))}
-                      </div>
-                  ) : activeTab === 'skin' ? (
-                       <div className="grid grid-cols-4 gap-4">
-                          {SKIN_TONES.map(tone => (
-                              <button key={tone} onClick={() => setDraft(prev => ({...prev, vibemoji: {...prev.vibemoji, skinTone: tone}}))} className={`h-12 rounded-xl border-2 transition-all ${draft.vibemoji.skinTone === tone ? 'border-white scale-110 shadow-2xl' : 'border-transparent opacity-40 hover:opacity-100'}`} style={{backgroundColor: tone}} />
-                          ))}
-                       </div>
-                  ) : (
-                      <div className="grid grid-cols-3 gap-3">
-                          {(VIBEMOJI_OPTIONS[activeTab as keyof typeof VIBEMOJI_OPTIONS] || []).map(item => (
-                              <button key={item} onClick={() => {
-                                  let key: keyof VibemojiConfig = 'hat';
-                                  if (activeTab === 'headgear') key = 'hat'; else if (activeTab === 'glasses') key = 'glasses'; else if (activeTab === 'bling') key = 'jewelry'; else if (activeTab === 'tops') key = 'outfit'; else if (activeTab === 'bottoms') key = 'pants'; else if (activeTab === 'shoes') key = 'shoes'; else if (activeTab === 'expressions') key = 'expression';
-                                  updateVibemoji(key, item);
-                              }} className={`bg-white/5 rounded-2xl p-3 h-24 flex flex-col items-center justify-center border-2 transition-all ${draft.vibemoji[activeTab === 'headgear' ? 'hat' : activeTab === 'glasses' ? 'glasses' : activeTab === 'bling' ? 'jewelry' : activeTab === 'tops' ? 'outfit' : activeTab === 'bottoms' ? 'pants' : activeTab === 'shoes' ? 'shoes' : 'expression' as keyof VibemojiConfig] === item ? 'border-white bg-white/10' : 'border-transparent opacity-60 hover:opacity-100'}`}>
-                                  <EventVibemojiRenderer config={{...draft.vibemoji, [activeTab === 'headgear' ? 'hat' : activeTab === 'glasses' ? 'glasses' : activeTab === 'bling' ? 'jewelry' : activeTab === 'tops' ? 'outfit' : activeTab === 'bottoms' ? 'pants' : activeTab === 'shoes' ? 'shoes' : 'expression']: item}} className="w-12 h-12 mb-2" />
-                                  <span className="text-[9px] font-black uppercase tracking-widest truncate w-full text-center">{item}</span>
-                              </button>
-                          ))}
-                      </div>
-                  )}
-              </div>
-           </section>
-
-           {/* --- STEP 3: MEDIA DECK --- */}
+           {/* --- STEP 2: MEDIA DECK --- */}
            <section>
-              <label className="text-[10px] font-black uppercase tracking-[0.4em] mb-4 block" style={{color: draft.themeColor}}>Step 3: Media Deck</label>
+              <label className="text-[10px] font-black uppercase tracking-[0.4em] mb-4 block" style={{color: draft.themeColor}}>Step 2: Media Deck</label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <label className={`aspect-[3/4] bg-white/5 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-white/10 hover:border-white/30 transition-all group ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                       <input 
@@ -555,7 +495,7 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
            </section>
 
            <section className="space-y-12">
-              <label className="text-[10px] font-black uppercase tracking-[0.4em] block" style={{color: draft.themeColor}}>Step 4: Logistics</label>
+              <label className="text-[10px] font-black uppercase tracking-[0.4em] block" style={{color: draft.themeColor}}>Step 3: Logistics</label>
               <div className="space-y-6">
                   <div>
                     <label className="block text-[10px] font-black text-white/30 uppercase tracking-widest mb-3">Drop Title</label>
