@@ -104,23 +104,49 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
      return { upcoming: upcomingList, past: pastList };
   }, [createdEvents]);
 
-  // Saved events — fetched from backend API, filtered to future events only
+  // Saved events — API-first with localStorage fallback
   const [savedEvents, setSavedEvents] = useState<KickflipEvent[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
 
+  // Read saved events from localStorage (full payloads, future only)
+  const loadSavedFromLocalStorage = (): KickflipEvent[] => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const events: KickflipEvent[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith('kickflip_saved_')) continue;
+      try {
+        const evt = JSON.parse(localStorage.getItem(key) || '') as KickflipEvent;
+        if (!evt?.id || !evt?.title) continue;            // skip old '1' flags
+        const startDate = evt.startDate ? new Date(evt.startDate) : null;
+        if (startDate === null || startDate >= now) events.push(evt);
+      } catch { /* skip malformed entries */ }
+    }
+    return events;
+  };
+
   useEffect(() => {
-    const apiBase = (import.meta as any).env?.VITE_API_URL;
-    if (!apiBase || !user?.id) return;
     setSavedLoading(true);
-    fetch(`${apiBase}/api/saved-events?user_id=${encodeURIComponent(user.id)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.saved_events) {
-          setSavedEvents(data.saved_events.map((row: any) => row.event as KickflipEvent));
-        }
-      })
-      .catch(err => console.warn('[profile] saved events fetch failed:', err))
-      .finally(() => setSavedLoading(false));
+    const apiBase = (import.meta as any).env?.VITE_API_URL;
+
+    if (apiBase && user?.id) {
+      fetch(`${apiBase}/api/saved-events?user_id=${encodeURIComponent(user.id)}`)
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(data => {
+          if (Array.isArray(data.saved_events)) {
+            setSavedEvents(data.saved_events.map((row: any) => row.event as KickflipEvent));
+          } else {
+            setSavedEvents(loadSavedFromLocalStorage());
+          }
+        })
+        .catch(() => setSavedEvents(loadSavedFromLocalStorage()))
+        .finally(() => setSavedLoading(false));
+    } else {
+      // No API configured — use localStorage
+      setSavedEvents(loadSavedFromLocalStorage());
+      setSavedLoading(false);
+    }
   }, [user?.id]);
 
   const handleSaveProfile = () => {

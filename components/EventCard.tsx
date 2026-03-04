@@ -39,14 +39,14 @@ export const EventCard: React.FC<EventCardProps> = ({
   const [isHovered, setIsHovered] = useState(false);
   const [failedVideos, setFailedVideos] = useState<Set<string>>(new Set());
 
-  // Saved state — optimistic UI backed by localStorage + backend API
+  // Saved state — full payload stored in localStorage so profile works offline/without API
   const savedKey = `kickflip_saved_${event.id}`;
-  const [isSaved, setIsSaved] = useState(() => localStorage.getItem(savedKey) === '1');
+  const [isSaved, setIsSaved] = useState(() => !!localStorage.getItem(savedKey));
   const handleToggleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const next = !isSaved;
     setIsSaved(next);                                      // optimistic update
-    if (next) localStorage.setItem(savedKey, '1');
+    if (next) localStorage.setItem(savedKey, JSON.stringify(event)); // store full payload
     else localStorage.removeItem(savedKey);
 
     const storedUser = localStorage.getItem('kickflip_user');
