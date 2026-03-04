@@ -375,6 +375,104 @@ app.post('/api/seed', async (req, res) => {
   );
 });
 
+// ─── Saved Events ────────────────────────────────────────────────────
+//
+// All three endpoints accept/return the same event_payload shape
+// (full KickflipEvent JSON) so the frontend never needs a second fetch.
+//
+// Auth: client sends { user_id } in body / query — same Google OAuth `sub`
+// used throughout the app. The backend uses the Supabase SERVICE_ROLE key
+// which bypasses RLS, so we validate user_id is a non-empty string.
+
+/** Resolve the start date string from an event payload */
+function resolveEventStartDate(payload) {
+  // Prefer structured startDate field (YYYY-MM-DD), fall back to .date string
+  if (payload.startDate) return new Date(payload.startDate);
+  if (payload.date) {
+    const d = new Date(payload.date);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+// POST /api/saved-events — save an event for a user
+app.post('/api/saved-events', async (req, res) => {
+  const { user_id, event_id, event_payload } = req.body;
+  if (!user_id || !event_id || !event_payload) {
+    return res.status(400).json({ error: 'user_id, event_id and event_payload are required' });
+  }
+
+  const { error } = await supabase.from('saved_events').upsert({
+    user_id,
+    event_id,
+    event_payload,
+    saved_at: new Date().toISOString(),
+  }, { onConflict: 'user_id,event_id' });
+
+  if (error) {
+    console.error('[saved-events] save error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.status(201).json({ success: true, event_id });
+});
+
+// DELETE /api/saved-events/:eventId — unsave an event for a user
+app.delete('/api/saved-events/:eventId', async (req, res) => {
+  const { eventId } = req.params;
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'user_id is required in request body' });
+
+  const { error } = await supabase
+    .from('saved_events')
+    .delete()
+    .eq('user_id', user_id)
+    .eq('event_id', eventId);
+
+  if (error) {
+    console.error('[saved-events] delete error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.json({ success: true, event_id: eventId });
+});
+
+// GET /api/saved-events?user_id=xxx — list a user's saved events
+// Returns only future / ongoing events (start_date >= today, or date unknown).
+app.get('/api/saved-events', async (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ error: 'user_id query param is required' });
+
+  const { data, error } = await supabase
+    .from('saved_events')
+    .select('event_id, event_payload, saved_at')
+    .eq('user_id', user_id)
+    .order('saved_at', { ascending: false });
+
+  if (error) {
+    console.error('[saved-events] fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0); // compare at day boundary
+
+  // Filter out events whose start date is in the past
+  const active = (data || []).filter(row => {
+    const d = resolveEventStartDate(row.event_payload);
+    return d === null || d >= now; // keep if date unknown or in the future
+  });
+
+  return res.json({
+    saved_events: active.map(row => ({
+      event_id: row.event_id,
+      saved_at: row.saved_at,
+      event: { id: row.event_id, ...row.event_payload },
+    })),
+    total: active.length,
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`KickflipEvents backend running on port ${port}`);

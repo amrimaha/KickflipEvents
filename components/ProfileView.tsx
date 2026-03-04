@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { User, EventDraft, VibemojiConfig, KickflipEvent } from '../types';
 import { EventCard } from './EventCard';
 import { IdentityCustomizer } from './IdentityCustomizer';
@@ -103,6 +103,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
      return { upcoming: upcomingList, past: pastList };
   }, [createdEvents]);
+
+  // Saved events — fetched from backend API, filtered to future events only
+  const [savedEvents, setSavedEvents] = useState<KickflipEvent[]>([]);
+  const [savedLoading, setSavedLoading] = useState(false);
+
+  useEffect(() => {
+    const apiBase = (import.meta as any).env?.VITE_API_URL;
+    if (!apiBase || !user?.id) return;
+    setSavedLoading(true);
+    fetch(`${apiBase}/api/saved-events?user_id=${encodeURIComponent(user.id)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.saved_events) {
+          setSavedEvents(data.saved_events.map((row: any) => row.event as KickflipEvent));
+        }
+      })
+      .catch(err => console.warn('[profile] saved events fetch failed:', err))
+      .finally(() => setSavedLoading(false));
+  }, [user?.id]);
 
   const handleSaveProfile = () => {
       onUpdateUser({
@@ -324,6 +343,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {upcoming.length === 0 && past.length === 0 && (
                   <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">
                       <p className="text-white/30 font-bold uppercase tracking-widest text-xs">No events yet</p>
+                  </div>
+              )}
+          </div>
+
+          <div className="h-px bg-white/10 w-full" />
+
+          {/* --- SAVED EVENTS SECTION --- */}
+          <div className="space-y-6">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 flex items-center gap-2">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Saved Events
+              </h3>
+
+              {savedLoading && (
+                  <div className="flex items-center gap-3 py-6 text-white/30 text-sm">
+                      <span className="w-4 h-4 rounded-full border-2 border-white/20 border-t-white/60 animate-spin flex-shrink-0" />
+                      Loading saved events…
+                  </div>
+              )}
+
+              {!savedLoading && savedEvents.length === 0 && (
+                  <div className="text-center py-8 border-2 border-dashed border-white/5 rounded-2xl">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-3 text-white/20">
+                          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      <p className="text-white/25 text-xs font-bold uppercase tracking-widest">No saved events yet</p>
+                      <p className="text-white/15 text-xs mt-1">Tap the bookmark on any event to save it</p>
+                  </div>
+              )}
+
+              {!savedLoading && savedEvents.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {savedEvents.map(evt => (
+                          <EventCard key={evt.id} event={evt} className="w-full h-[270px]" onClick={() => {}} />
+                      ))}
                   </div>
               )}
           </div>

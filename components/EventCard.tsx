@@ -39,15 +39,38 @@ export const EventCard: React.FC<EventCardProps> = ({
   const [isHovered, setIsHovered] = useState(false);
   const [failedVideos, setFailedVideos] = useState<Set<string>>(new Set());
 
-  // Saved state — persisted in localStorage keyed by event id
+  // Saved state — optimistic UI backed by localStorage + backend API
   const savedKey = `kickflip_saved_${event.id}`;
   const [isSaved, setIsSaved] = useState(() => localStorage.getItem(savedKey) === '1');
-  const handleToggleSave = (e: React.MouseEvent) => {
+  const handleToggleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const next = !isSaved;
-    setIsSaved(next);
+    setIsSaved(next);                                      // optimistic update
     if (next) localStorage.setItem(savedKey, '1');
     else localStorage.removeItem(savedKey);
+
+    const storedUser = localStorage.getItem('kickflip_user');
+    const userId = storedUser ? JSON.parse(storedUser)?.id : null;
+    const apiBase = (import.meta as any).env?.VITE_API_URL;
+    if (!userId || !apiBase) return;                       // guest / no backend — localStorage only
+
+    try {
+      if (next) {
+        await fetch(`${apiBase}/api/saved-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, event_id: event.id, event_payload: event }),
+        });
+      } else {
+        await fetch(`${apiBase}/api/saved-events/${event.id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId }),
+        });
+      }
+    } catch (err) {
+      console.warn('[save] API sync failed — state kept in localStorage:', err);
+    }
   };
 
   // --- URL SYNCHRONIZATION ---
