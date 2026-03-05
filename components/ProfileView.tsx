@@ -431,20 +431,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       </div>
                   </div>
 
-                  <div className="pt-6 border-t border-white/10 space-y-4">
-                      <div className="flex flex-wrap gap-6 text-xs font-bold text-white/40 uppercase tracking-widest">
-                          <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-                          <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-                          <a href="mailto:support@kickflip.co" className="hover:text-white transition-colors">Contact Support</a>
-                      </div>
-
-                      <button
-                         onClick={onLogout}
-                         className="w-full py-4 rounded-xl border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all mt-4"
-                      >
-                         Log Out
-                      </button>
-                  </div>
               </div>
           </section>
 
@@ -533,6 +519,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       ))}
                   </div>
               )}
+          </div>
+
+          {/* --- FOOTER: T&C + LOG OUT --- */}
+          <div className="pt-4 space-y-4">
+              <div className="flex flex-wrap gap-6 text-xs font-bold text-white/40 uppercase tracking-widest">
+                  <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
+                  <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
+                  <a href="mailto:support@kickflip.co" className="hover:text-white transition-colors">Contact Support</a>
+              </div>
+              <button
+                 onClick={onLogout}
+                 className="w-full py-4 rounded-xl border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all"
+              >
+                 Log Out
+              </button>
           </div>
 
       </div>
