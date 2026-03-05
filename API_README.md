@@ -16,12 +16,13 @@ Protected endpoints require an `Authorization: Bearer <CRON_SECRET>` header.
 4. [Saved Events](#4-saved-events)
 5. [Events (CRUD)](#5-events-crud)
 6. [User Profile](#6-user-profile)
-7. [Crawl](#7-crawl)
-8. [Seed](#8-seed)
-9. [Admin](#9-admin)
-10. [Error Responses](#10-error-responses)
-11. [Environment Variables](#11-environment-variables)
-12. [Data Models](#12-data-models)
+7. [Clickstream Tracking](#7-clickstream-tracking)
+8. [Crawl](#8-crawl)
+9. [Seed](#9-seed)
+10. [Admin](#10-admin)
+11. [Error Responses](#11-error-responses)
+12. [Environment Variables](#12-environment-variables)
+13. [Data Models](#13-data-models)
 
 ---
 
@@ -488,7 +489,87 @@ Save onboarding preferences after the welcome flow completes.
 
 ---
 
-## 7. Crawl
+## 7. Clickstream Tracking
+
+### `POST /api/events/click`
+
+Records a user action on an event card. **No authentication required** — supports
+both logged-in and anonymous users. The frontend fires this as a non-blocking
+`navigator.sendBeacon` call (falls back to `fetch` with `keepalive: true`), so
+it never delays or blocks the UX.
+
+**Anonymous tracking** — `anon_id` is a UUID generated on first page load and
+persisted in `localStorage` under the key `kf_anon_id`. It is always sent,
+enabling anonymous → authenticated journey stitching.
+
+**Request body**
+
+```json
+{
+  "event_id":   "evt-abc123",
+  "action":     "view_detail",
+  "anon_id":    "550e8400-e29b-41d4-a716-446655440000",
+  "user_id":    "google-sub-id-or-null",
+  "session_id": "uuid-or-null",
+  "source":     "browse",
+  "extras":     { "cta_label": "Book Now" }
+}
+```
+
+| Field        | Type     | Required | Description |
+|--------------|----------|----------|-------------|
+| `event_id`   | `string` | Yes      | ID of the event that was interacted with |
+| `action`     | `string` | Yes      | See action values below |
+| `anon_id`    | `string` | Yes      | localStorage UUID (always present, even for auth'd users) |
+| `user_id`    | `string` | No       | Authenticated user ID — `null` for anonymous visitors |
+| `session_id` | `uuid`   | No       | FK to `user_sessions.id` |
+| `source`     | `string` | No       | `browse` \| `search` \| `saved` — where on the page the card appeared |
+| `extras`     | `object` | No       | Arbitrary key-value metadata (see below) |
+
+**Action values**
+
+| Action           | Triggered when |
+|------------------|----------------|
+| `view_detail`    | Card clicked — detail modal opened |
+| `cta_click`      | Primary CTA button pressed (Book Now / Get Tickets / Visit / etc.) |
+| `save`           | Bookmark toggled on |
+| `unsave`         | Bookmark toggled off |
+| `share`          | Share button pressed |
+| `checkout_start` | Native event CheckoutModal opened |
+
+**Common `extras` fields**
+
+| Key          | Example value   | Description |
+|--------------|-----------------|-------------|
+| `cta_label`  | `"Book Now"`    | Exact text of the CTA button (for `cta_click` action) |
+| `referrer`   | `"https://..."` | Page referrer |
+
+**Response `201`**
+```json
+{ "ok": true }
+```
+
+**Response `400`** — missing or invalid required field
+```json
+{ "error": "action must be one of: view_detail, cta_click, save, unsave, share, checkout_start" }
+```
+
+---
+
+**Storage design notes**
+
+| Layer | Table | TTL | Purpose |
+|-------|-------|-----|---------|
+| Hot   | `event_clicks` | 30 days | Raw rows — fast inserts, recent queries |
+| Cold  | `event_click_daily` | Permanent | Nightly rollup via `rollup_event_clicks_daily()` — long-term trends |
+
+The nightly cron should run in this order:
+1. `SELECT rollup_event_clicks_daily();` — aggregate yesterday into cold table
+2. `DELETE FROM event_clicks WHERE created_at < NOW() - INTERVAL '30 days';`
+
+---
+
+## 8. Crawl
 
 ### `POST /api/crawl`
 
@@ -518,7 +599,7 @@ embeddings. Window: today → +7 days.
 
 ---
 
-## 8. Seed
+## 9. Seed
 
 ### `POST /api/seed`
 
@@ -541,7 +622,7 @@ One-time operation: embeds all existing `kickflip_events` rows that have no
 
 ---
 
-## 9. Admin
+## 10. Admin
 
 Admin endpoints require the caller's `is_super_admin` flag to be `true` in the
 `users` table. Pass `admin_id` in the request body for UI callers; machine
@@ -702,7 +783,7 @@ Audit trail of all admin actions.
 
 ---
 
-## 10. Error Responses
+## 11. Error Responses
 
 All error responses follow this shape:
 
@@ -720,7 +801,7 @@ All error responses follow this shape:
 
 ---
 
-## 11. Environment Variables
+## 12. Environment Variables
 
 ### Railway (backend)
 
@@ -745,7 +826,7 @@ All error responses follow this shape:
 
 ---
 
-## 12. Data Models
+## 13. Data Models
 
 ### `KickflipEvent`
 

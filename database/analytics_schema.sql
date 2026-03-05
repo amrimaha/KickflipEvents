@@ -263,4 +263,121 @@ $$;
 -- Add to nightly-cleanup cron:
 --   DELETE FROM api_requests WHERE created_at < NOW() - INTERVAL '30 days';
 --   DELETE FROM platform_metrics_snapshots WHERE computed_at < NOW() - INTERVAL '90 days';
+--   DELETE FROM event_clicks WHERE created_at < NOW() - INTERVAL '30 days';
+-- =============================================================================
+
+-- =============================================================================
+-- CLICKSTREAM SCHEMA
+--
+-- Design rationale (senior engineering decisions):
+--
+-- 1. FLAT NORMALIZED TABLE (not pure JSONB)
+--    Core fields (event_id, action, user_id, anon_id) are top-level columns with
+--    B-tree indexes. This enables efficient GROUP BY, ORDER BY, and range scans
+--    without GIN indexes, which are expensive on write-heavy tables.
+--
+-- 2. JSONB USED NARROWLY (extras column only)
+--    Variable, rarely-queried metadata (cta_label, referrer, scroll_depth) goes in
+--    a single JSONB `extras` column. This avoids a schema migration every time we
+--    want to capture a new signal, while keeping the hot columns typed + indexed.
+--
+-- 3. ANON_ID ALWAYS PRESENT
+--    A UUID stored in localStorage (key: kf_anon_id) is set on first page load.
+--    It bridges anonymous → authenticated journeys: when a user signs in we can
+--    link their pre-login clicks to their new user_id via shared anon_id.
+--
+-- 4. TWO-TIER STORAGE (hot + cold)
+--    event_clicks      — raw, 30-day TTL (nightly cron deletes old rows)
+--    event_click_daily — pre-aggregated daily rollup, lives forever
+--    Nightly cron runs rollup_event_clicks_daily() before deleting raw rows.
+--    This keeps storage costs low while preserving long-term trend data.
+-- =============================================================================
+
+-- =============================================================================
+-- TABLE: event_clicks
+-- Raw clickstream. One row per user action on an event card.
+--
+-- Actions:
+--   view_detail    — card clicked → detail modal opened
+--   cta_click      — primary CTA button pressed (Book Now / Get Tickets / etc.)
+--   save           — event saved (bookmark on)
+--   unsave         — event unsaved (bookmark off)
+--   share          — share button pressed
+--   checkout_start — CheckoutModal opened (native events only)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS event_clicks (
+  id          UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id    TEXT        NOT NULL,                          -- kickflip_events.id
+  action      TEXT        NOT NULL,                          -- see Actions above
+  user_id     TEXT        REFERENCES users(id) ON DELETE SET NULL,  -- NULL = anonymous
+  anon_id     TEXT        NOT NULL,                          -- localStorage UUID, always set
+  session_id  UUID        REFERENCES user_sessions(id) ON DELETE SET NULL,
+  source      TEXT,                                          -- 'browse' | 'search' | 'saved'
+  extras      JSONB,                                         -- cta_label, referrer, etc.
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes covering the most common query patterns:
+--   "How many views/clicks did event X get this week?"
+CREATE INDEX IF NOT EXISTS event_clicks_event_action_idx ON event_clicks (event_id, action, created_at DESC);
+--   "What did user Y interact with?"
+CREATE INDEX IF NOT EXISTS event_clicks_user_idx         ON event_clicks (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+--   "Trace anonymous user's journey"
+CREATE INDEX IF NOT EXISTS event_clicks_anon_idx         ON event_clicks (anon_id, created_at DESC);
+--   "Funnel across all events in a time window"
+CREATE INDEX IF NOT EXISTS event_clicks_action_time_idx  ON event_clicks (action, created_at DESC);
+
+-- =============================================================================
+-- TABLE: event_click_daily
+-- Pre-aggregated daily rollup. One row per (event_id, action, date).
+-- Populated nightly by rollup_event_clicks_daily(). Lives forever.
+-- Enables long-term trend charts without querying the 30-day hot table.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS event_click_daily (
+  event_id    TEXT  NOT NULL,
+  action      TEXT  NOT NULL,
+  date        DATE  NOT NULL,
+  click_count INT   NOT NULL DEFAULT 0,
+  uniq_count  INT   NOT NULL DEFAULT 0,  -- COUNT(DISTINCT COALESCE(user_id, anon_id))
+  PRIMARY KEY (event_id, action, date)
+);
+
+CREATE INDEX IF NOT EXISTS event_click_daily_event_idx ON event_click_daily (event_id, date DESC);
+CREATE INDEX IF NOT EXISTS event_click_daily_date_idx  ON event_click_daily (date DESC);
+
+-- =============================================================================
+-- FUNCTION: rollup_event_clicks_daily()
+-- Aggregates yesterday's raw event_clicks into event_click_daily.
+-- Designed to run nightly before the raw-row cleanup cron deletes rows older than 30d.
+-- Safe to call multiple times (INSERT ... ON CONFLICT DO UPDATE).
+-- =============================================================================
+CREATE OR REPLACE FUNCTION rollup_event_clicks_daily()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_yesterday DATE := (NOW() AT TIME ZONE 'UTC')::DATE - 1;
+BEGIN
+  INSERT INTO event_click_daily (event_id, action, date, click_count, uniq_count)
+  SELECT
+    event_id,
+    action,
+    v_yesterday                                            AS date,
+    COUNT(*)                                               AS click_count,
+    COUNT(DISTINCT COALESCE(user_id, anon_id))             AS uniq_count
+  FROM event_clicks
+  WHERE created_at >= v_yesterday
+    AND created_at <  v_yesterday + INTERVAL '1 day'
+  GROUP BY event_id, action
+  ON CONFLICT (event_id, action, date)
+  DO UPDATE SET
+    click_count = EXCLUDED.click_count,
+    uniq_count  = EXCLUDED.uniq_count;
+END;
+$$;
+
+-- =============================================================================
+-- NIGHTLY CRON ORDER (run these in sequence):
+--   1. SELECT rollup_event_clicks_daily();          -- aggregate yesterday
+--   2. DELETE FROM event_clicks WHERE created_at < NOW() - INTERVAL '30 days';
 -- =============================================================================

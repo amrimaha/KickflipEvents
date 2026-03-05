@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { KickflipEvent, ThemeConfig } from '../types';
 import { getVideoForEvent, CATEGORY_COLORS } from '../constants';
+import { trackClick } from '../services/trackClick';
 
 interface EventCardProps {
   event: KickflipEvent;
@@ -49,8 +50,9 @@ export const EventCard: React.FC<EventCardProps> = ({
     if (next) localStorage.setItem(savedKey, JSON.stringify(event)); // store full payload
     else localStorage.removeItem(savedKey);
 
-    const storedUser = localStorage.getItem('kickflip_user');
-    const userId = storedUser ? JSON.parse(storedUser)?.id : null;
+    const userId = getStoredUserId();
+    trackClick({ event_id: event.id, action: next ? 'save' : 'unsave', user_id: userId });
+
     const apiBase = (import.meta as any).env?.VITE_API_URL;
     if (!userId || !apiBase) return;                       // guest / no backend — localStorage only
 
@@ -173,8 +175,17 @@ export const EventCard: React.FC<EventCardProps> = ({
     return () => observer.disconnect();
   }, [videoNode, variant, currentMedia.type, currentIndex]); 
 
+  // --- SHARED HELPER: authenticated user id (null for guests) ---
+  const getStoredUserId = (): string | null => {
+    try {
+      const u = localStorage.getItem('kickflip_user');
+      return u ? JSON.parse(u)?.id ?? null : null;
+    } catch { return null; }
+  };
+
   // --- INTERACTION HANDLERS ---
   const handleClick = (e: React.MouseEvent) => {
+      trackClick({ event_id: event.id, action: 'view_detail', user_id: getStoredUserId() });
       if (onClick) {
           e.stopPropagation();
           onClick(event);
@@ -220,6 +231,7 @@ export const EventCard: React.FC<EventCardProps> = ({
 
   const handleShare = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    trackClick({ event_id: event.id, action: 'share', user_id: getStoredUserId() });
     const permalink = `${window.location.origin}/?event=${event.id}`;
     if (navigator.share) {
       navigator.share({
@@ -245,12 +257,20 @@ export const EventCard: React.FC<EventCardProps> = ({
   const isNative = event.origin === 'user' || !!event.creatorId;
   
   let ctaText = "Learn More";
-  let ctaAction = () => { window.open(event.link, '_blank'); };
+  const fireCta = (label: string) => {
+    trackClick({
+      event_id: event.id,
+      action: 'cta_click',
+      user_id: getStoredUserId(),
+      extras: { cta_label: label },
+    });
+  };
+  let ctaAction = () => { fireCta(ctaText); window.open(event.link, '_blank'); };
 
   if (isNative && onBook) {
       // Native Kickflip Event -> Internal Checkout
       ctaText = (hasPrice && !isFree) ? "Book Now" : "RSVP Now";
-      ctaAction = () => onBook(event);
+      ctaAction = () => { fireCta(ctaText); onBook(event); };
   } else {
       // External/Featured/Crawled -> External Link
       if (event.origin === 'crawl') {

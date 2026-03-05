@@ -664,6 +664,56 @@ app.post('/api/admin/metrics/snapshot', async (req, res) => {
   }
 });
 
+// ─── POST /api/events/click — clickstream event tracking ─────────────
+//
+// Records a user action on an event card (view, CTA, save, share, etc.).
+// No auth required — anonymous tracking via anon_id (localStorage UUID).
+// Fire-and-forget from the frontend: errors must not block the UX.
+//
+// Body: { event_id, action, anon_id, user_id?, session_id?, source?, extras? }
+// Actions: view_detail | cta_click | save | unsave | share | checkout_start
+
+const VALID_CLICK_ACTIONS = new Set([
+  'view_detail', 'cta_click', 'save', 'unsave', 'share', 'checkout_start',
+]);
+
+app.post('/api/events/click', async (req, res) => {
+  const { event_id, action, anon_id, user_id, session_id, source, extras } = req.body || {};
+
+  // Validate required fields
+  if (!event_id || typeof event_id !== 'string') {
+    return res.status(400).json({ error: 'event_id is required' });
+  }
+  if (!action || !VALID_CLICK_ACTIONS.has(action)) {
+    return res.status(400).json({ error: `action must be one of: ${[...VALID_CLICK_ACTIONS].join(', ')}` });
+  }
+  if (!anon_id || typeof anon_id !== 'string') {
+    return res.status(400).json({ error: 'anon_id is required' });
+  }
+
+  try {
+    const { error } = await supabase.from('event_clicks').insert({
+      event_id:   event_id.trim(),
+      action,
+      anon_id:    anon_id.trim(),
+      user_id:    user_id   || null,
+      session_id: session_id || null,
+      source:     source    || null,
+      extras:     extras    || null,
+    });
+
+    if (error) {
+      console.error('[events/click] insert error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('[events/click] unexpected error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`KickflipEvents backend running on port ${port}`);
