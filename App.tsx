@@ -1164,7 +1164,7 @@ const App: React.FC = () => {
 
       <VideoBackground key={theme.backgroundUrl} src={theme.backgroundUrl} type={theme.backgroundType} isOverlayDark={currentEvents.length > 0 || messages.length > 1} />
 
-      <div className="relative z-10 w-full flex flex-col pb-64 overflow-x-hidden">
+      <div className="relative z-10 w-full flex flex-col pb-64 overflow-x-clip">
         {/* Persistent Top Navigation */}
         <header className={`sticky top-0 z-50 w-full transition-all duration-300 ${isScrolled ? 'bg-black/70 backdrop-blur-xl border-b border-white/10' : ''}`}>
           {/* Normal nav — logo + settings + instagram */}
