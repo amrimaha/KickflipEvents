@@ -501,7 +501,7 @@ function resolveEventStartDate(payload) {
 
 // POST /api/saved-events — save an event for a user
 app.post('/api/saved-events', async (req, res) => {
-  const { user_id, event_id, event_payload } = req.body;
+  const { user_id, event_id, event_payload, source_url } = req.body;
   if (!user_id || !event_id || !event_payload) {
     return res.status(400).json({ error: 'user_id, event_id and event_payload are required' });
   }
@@ -510,6 +510,8 @@ app.post('/api/saved-events', async (req, res) => {
     user_id,
     event_id,
     event_payload,
+    // Prefer explicitly-passed source_url, fall back to link field inside the payload
+    source_url: source_url || event_payload?.link || null,
     saved_at: new Date().toISOString(),
   }, { onConflict: 'user_id,event_id' });
 
@@ -549,7 +551,7 @@ app.get('/api/saved-events', async (req, res) => {
 
   const { data, error } = await supabase
     .from('saved_events')
-    .select('event_id, event_payload, saved_at')
+    .select('event_id, event_payload, source_url, saved_at')
     .eq('user_id', user_id)
     .order('saved_at', { ascending: false });
 
@@ -569,8 +571,9 @@ app.get('/api/saved-events', async (req, res) => {
 
   return res.json({
     saved_events: active.map(row => ({
-      event_id: row.event_id,
-      saved_at: row.saved_at,
+      event_id:   row.event_id,
+      saved_at:   row.saved_at,
+      source_url: row.source_url || row.event_payload?.link || null,
       event: { id: row.event_id, ...row.event_payload },
     })),
     total: active.length,
@@ -682,7 +685,7 @@ const VALID_CLICK_ACTIONS = new Set([
 ]);
 
 app.post('/api/events/click', async (req, res) => {
-  const { event_id, action, anon_id, user_id, session_id, source, extras } = req.body || {};
+  const { event_id, action, anon_id, user_id, session_id, source, source_url, extras } = req.body || {};
 
   // Validate required fields
   if (!event_id || typeof event_id !== 'string') {
@@ -700,10 +703,11 @@ app.post('/api/events/click', async (req, res) => {
       event_id:   event_id.trim(),
       action,
       anon_id:    anon_id.trim(),
-      user_id:    user_id   || null,
+      user_id:    user_id    || null,
       session_id: session_id || null,
-      source:     source    || null,
-      extras:     extras    || null,
+      source:     source     || null,
+      source_url: source_url || null,
+      extras:     extras     || null,
     });
 
     if (error) {

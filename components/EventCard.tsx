@@ -51,7 +51,7 @@ export const EventCard: React.FC<EventCardProps> = ({
     else localStorage.removeItem(savedKey);
 
     const userId = getStoredUserId();
-    trackClick({ event_id: event.id, action: next ? 'save' : 'unsave', user_id: userId });
+    trackClick({ event_id: event.id, action: next ? 'save' : 'unsave', user_id: userId, source_url: event.link || null });
 
     const apiBase = (import.meta as any).env?.VITE_API_URL;
     if (!userId || !apiBase) return;                       // guest / no backend — localStorage only
@@ -61,7 +61,7 @@ export const EventCard: React.FC<EventCardProps> = ({
         await fetch(`${apiBase}/api/saved-events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, event_id: event.id, event_payload: event }),
+          body: JSON.stringify({ user_id: userId, event_id: event.id, event_payload: event, source_url: event.link || null }),
         });
       } else {
         await fetch(`${apiBase}/api/saved-events/${event.id}`, {

@@ -148,6 +148,11 @@ Users can bookmark events. State is persisted per `(user_id, event_id)` pair.
 The full event snapshot (`event_payload`) is stored at save time so the profile
 page never needs a second fetch. Past events are automatically excluded from `GET`.
 
+**Live-search events** (returned by the AI chat but not stored in `kickflip_events`)
+are fully supported: pass `source_url` with the external link so the row is always
+traceable without a JOIN to `kickflip_events`. The server also auto-extracts
+`event_payload.link` as a fallback when `source_url` is omitted.
+
 ---
 
 ### `POST /api/saved-events`
@@ -159,15 +164,17 @@ Save (bookmark) an event for a user.
 {
   "user_id":       "108923456789012345678",
   "event_id":      "evt-abc123",
-  "event_payload": { "...full KickflipEvent object..." }
+  "event_payload": { "...full KickflipEvent object..." },
+  "source_url":    "https://eventbrite.com/e/sunday-jazz-brunch-12345"
 }
 ```
 
-| Field           | Type   | Required | Description                                             |
-|-----------------|--------|----------|---------------------------------------------------------|
-| `user_id`       | string | ✅        | Google OAuth `sub` (from `kickflip_user` localStorage)  |
-| `event_id`      | string | ✅        | Event ID to save                                        |
-| `event_payload` | object | ✅        | Full `KickflipEvent` snapshot                           |
+| Field           | Type   | Required | Description                                                              |
+|-----------------|--------|----------|--------------------------------------------------------------------------|
+| `user_id`       | string | ✅        | Google OAuth `sub` (from `kickflip_user` localStorage)                   |
+| `event_id`      | string | ✅        | Event ID to save                                                         |
+| `event_payload` | object | ✅        | Full `KickflipEvent` snapshot                                            |
+| `source_url`    | string | —        | Original event listing URL. Required for live-search / ephemeral events. Falls back to `event_payload.link` if omitted. |
 
 **Response `201`**
 ```json
@@ -220,17 +227,18 @@ Fetch all saved events for a user. **Automatically filters out past events**
 {
   "saved_events": [
     {
-      "event_id": "evt-abc123",
-      "saved_at": "2026-03-01T14:22:00.000Z",
+      "event_id":   "evt-abc123",
+      "saved_at":   "2026-03-01T14:22:00.000Z",
+      "source_url": "https://eventbrite.com/e/sunday-jazz-brunch-12345",
       "event": {
-        "id":          "evt-abc123",
-        "title":       "Sunday Jazz Brunch @ Café Racer",
-        "startDate":   "2026-03-08",
-        "category":    "music",
-        "price":       "From $25",
-        "location":    "Capitol Hill, Seattle",
-        "imageUrl":    "https://...",
-        "vibeTags":    ["jazz", "brunch"]
+        "id":        "evt-abc123",
+        "title":     "Sunday Jazz Brunch @ Café Racer",
+        "startDate": "2026-03-08",
+        "category":  "music",
+        "price":     "From $25",
+        "location":  "Capitol Hill, Seattle",
+        "imageUrl":  "https://...",
+        "vibeTags":  ["jazz", "brunch"]
       }
     }
   ],
@@ -238,12 +246,13 @@ Fetch all saved events for a user. **Automatically filters out past events**
 }
 ```
 
-| Response field            | Description                                          |
-|---------------------------|------------------------------------------------------|
-| `saved_events`            | Array of saved event rows (future events only)       |
-| `saved_events[].event`    | Full `KickflipEvent` snapshot at time of save        |
-| `saved_events[].saved_at` | ISO timestamp when user saved this event             |
-| `total`                   | Count of returned (active) saved events              |
+| Response field               | Description                                                          |
+|------------------------------|----------------------------------------------------------------------|
+| `saved_events`               | Array of saved event rows (future events only)                       |
+| `saved_events[].event`       | Full `KickflipEvent` snapshot at time of save                        |
+| `saved_events[].saved_at`    | ISO timestamp when user saved this event                             |
+| `saved_events[].source_url`  | Direct link to the event listing — always present if link was known  |
+| `total`                      | Count of returned (active) saved events                              |
 
 **Response `400`** — `user_id` query param missing
 **Response `500`** — Supabase fetch error
@@ -495,12 +504,15 @@ Save onboarding preferences after the welcome flow completes.
 
 Records a user action on an event card. **No authentication required** — supports
 both logged-in and anonymous users. The frontend fires this as a non-blocking
-`navigator.sendBeacon` call (falls back to `fetch` with `keepalive: true`), so
-it never delays or blocks the UX.
+`fetch` with `keepalive: true`, so it never delays or blocks the UX.
 
 **Anonymous tracking** — `anon_id` is a UUID generated on first page load and
 persisted in `localStorage` under the key `kf_anon_id`. It is always sent,
 enabling anonymous → authenticated journey stitching.
+
+**Live-search events** discovered by the AI chat are not stored in
+`kickflip_events`. Pass `source_url` so the clickstream row is always linkable
+back to the original listing even without a DB record.
 
 **Request body**
 
@@ -511,6 +523,7 @@ enabling anonymous → authenticated journey stitching.
   "anon_id":    "550e8400-e29b-41d4-a716-446655440000",
   "user_id":    "google-sub-id-or-null",
   "session_id": "uuid-or-null",
+  "source_url": "https://eventbrite.com/e/sunday-jazz-brunch-12345",
   "source":     "browse",
   "extras":     { "cta_label": "Book Now" }
 }
@@ -523,6 +536,7 @@ enabling anonymous → authenticated journey stitching.
 | `anon_id`    | `string` | Yes      | localStorage UUID (always present, even for auth'd users) |
 | `user_id`    | `string` | No       | Authenticated user ID — `null` for anonymous visitors |
 | `session_id` | `uuid`   | No       | FK to `user_sessions.id` |
+| `source_url` | `string` | No       | Original listing URL — required for live-search events not in `kickflip_events` |
 | `source`     | `string` | No       | `browse` \| `search` \| `saved` — where on the page the card appeared |
 | `extras`     | `object` | No       | Arbitrary key-value metadata (see below) |
 

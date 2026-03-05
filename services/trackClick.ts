@@ -21,6 +21,8 @@ export interface ClickPayload {
   action:      ClickAction;
   user_id?:    string | null;
   session_id?: string | null;
+  /** Original event URL — required for live-search events not stored in kickflip_events */
+  source_url?: string | null;
   /** Where on the page the card was: 'browse' | 'search' | 'saved' */
   source?:     string;
   /** Variable metadata: cta_label, referrer, etc. */
