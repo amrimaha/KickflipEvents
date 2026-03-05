@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, EventDraft } from '../types';
 
 interface AdminDashboardViewProps {
@@ -13,19 +13,29 @@ interface AdminDashboardViewProps {
 
 type Tab = 'supply' | 'tasks' | 'telemetry';
 
+interface TelemetryData {
+  mau: number;
+  unique_users: number;
+  new_users_today: number;
+  interaction_time: string | null;
+  avg_response_ms: number | null;
+  p95_response_ms: number | null;
+  queries_today: number;
+  cache_hit_rate: number;
+  active_sessions: number;
+  sessions_today: number;
+  computed_at: string | null;
+  total_events: number;
+  user_events: number;
+  crawl_events: number;
+  provider_pct: number;
+  crawler_pct: number;
+}
+
 const DEFAULT_SOURCES = [
   'https://do206.com/p/seattle',
   'https://ra.co/events/us/seattle',
 ];
-
-const TELEMETRY = {
-  monthlyActive: 12842,
-  uniqueUsers:   8921,
-  interactionTime: '4m 12s',
-  responseTime: '240ms',
-  providerPct: 75,
-  crawlerPct:  25,
-};
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   user,
@@ -43,6 +53,34 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [isSyncing, setIsSyncing]   = useState(false);
   const [syncLog, setSyncLog]       = useState<string[]>([]);
   const totalCrawled = allEvents.filter(e => e.origin === 'crawl').length;
+
+  // ── Telemetry state ───────────────────────────────────────────────
+  const [telemetry, setTelemetry]           = useState<TelemetryData | null>(null);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
+  useEffect(() => {
+    const apiBase   = (import.meta as any).env?.VITE_API_URL;
+    const cronSecret = (import.meta as any).env?.VITE_CRON_SECRET;
+    if (!apiBase) return;
+
+    const fetchTelemetry = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/admin/telemetry`, {
+          headers: { Authorization: `Bearer ${cronSecret ?? ''}` },
+        });
+        if (res.ok) setTelemetry(await res.json());
+      } catch {
+        // silently ignore — stale data is fine
+      } finally {
+        setTelemetryLoading(false);
+      }
+    };
+
+    setTelemetryLoading(true);
+    fetchTelemetry();
+    const timer = setInterval(fetchTelemetry, 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const addSource = () => {
     const trimmed = newSource.trim();
@@ -432,13 +470,40 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
 
             <div className="p-8 space-y-8">
+
+              {/* Loading / no-data notice */}
+              {telemetryLoading && !telemetry && (
+                <p className="text-xs text-white/30 uppercase tracking-widest animate-pulse">Loading metrics…</p>
+              )}
+              {!telemetryLoading && !telemetry && (
+                <p className="text-xs text-white/20 uppercase tracking-widest">
+                  No snapshot yet — metrics refresh every 5 min via cron.
+                </p>
+              )}
+
               {/* 4 metric cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Monthly Active',   value: TELEMETRY.monthlyActive.toLocaleString(), color: '#34d399' },
-                  { label: 'Unique Users',      value: TELEMETRY.uniqueUsers.toLocaleString(),   color: '#60a5fa' },
-                  { label: 'Interaction Time',  value: TELEMETRY.interactionTime,                color: '#fb923c' },
-                  { label: 'Response Time',     value: TELEMETRY.responseTime,                   color: '#a78bfa' },
+                  {
+                    label: 'Monthly Active',
+                    value: telemetry ? telemetry.mau.toLocaleString() : '—',
+                    color: '#34d399',
+                  },
+                  {
+                    label: 'Unique Users',
+                    value: telemetry ? telemetry.unique_users.toLocaleString() : '—',
+                    color: '#60a5fa',
+                  },
+                  {
+                    label: 'Interaction Time',
+                    value: telemetry?.interaction_time ?? '—',
+                    color: '#fb923c',
+                  },
+                  {
+                    label: 'Response Time',
+                    value: telemetry?.avg_response_ms != null ? `${telemetry.avg_response_ms}ms` : '—',
+                    color: '#a78bfa',
+                  },
                 ].map(m => (
                   <div key={m.label} className="bg-[#111] border border-white/8 rounded-2xl p-6">
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">{m.label}</p>
@@ -449,29 +514,36 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               {/* Supply Mix Distribution */}
               <div className="bg-[#111] border border-white/8 rounded-2xl p-8">
-                <h3 className="text-base font-black text-white uppercase tracking-wider mb-8">Supply Mix Distribution</h3>
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-base font-black text-white uppercase tracking-wider">Supply Mix Distribution</h3>
+                  {telemetry?.computed_at && (
+                    <p className="text-[10px] text-white/20 uppercase tracking-widest">
+                      Snapshot: {new Date(telemetry.computed_at).toLocaleTimeString()}
+                    </p>
+                  )}
+                </div>
                 <div className="space-y-8">
                   <div>
                     <div className="flex justify-between items-center mb-3">
                       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50">Providers (User Generated)</p>
-                      <p className="text-sm font-black text-white">{TELEMETRY.providerPct}%</p>
+                      <p className="text-sm font-black text-white">{telemetry?.provider_pct ?? 0}%</p>
                     </div>
                     <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-white rounded-full transition-all duration-1000"
-                        style={{ width: `${TELEMETRY.providerPct}%` }}
+                        style={{ width: `${telemetry?.provider_pct ?? 0}%` }}
                       />
                     </div>
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-3">
                       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Crawlers (Algorithmic Ingestion)</p>
-                      <p className="text-sm font-black text-white/40">{TELEMETRY.crawlerPct}%</p>
+                      <p className="text-sm font-black text-white/40">{telemetry?.crawler_pct ?? 0}%</p>
                     </div>
                     <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-white/30 rounded-full transition-all duration-1000"
-                        style={{ width: `${TELEMETRY.crawlerPct}%` }}
+                        style={{ width: `${telemetry?.crawler_pct ?? 0}%` }}
                       />
                     </div>
                   </div>
@@ -481,9 +553,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               {/* Live events breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {[
-                  { label: 'User Created Events', value: allEvents.filter(e => e.origin !== 'crawl').length, color: '#34d399' },
-                  { label: 'Crawled Events',       value: allEvents.filter(e => e.origin === 'crawl').length, color: '#a78bfa' },
-                  { label: 'Total in Registry',    value: allEvents.length,                                   color: '#60a5fa' },
+                  {
+                    label: 'User Created Events',
+                    value: telemetry?.user_events ?? allEvents.filter(e => e.origin !== 'crawl').length,
+                    color: '#34d399',
+                  },
+                  {
+                    label: 'Crawled Events',
+                    value: telemetry?.crawl_events ?? allEvents.filter(e => e.origin === 'crawl').length,
+                    color: '#a78bfa',
+                  },
+                  {
+                    label: 'Total in Registry',
+                    value: telemetry?.total_events ?? allEvents.length,
+                    color: '#60a5fa',
+                  },
                 ].map(s => (
                   <div key={s.label} className="bg-[#111] border border-white/8 rounded-2xl p-6">
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-3">{s.label}</p>

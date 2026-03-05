@@ -37,6 +37,86 @@ const supabase     = createClient(
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
+// ─── Analytics helpers ───────────────────────────────────────────────
+
+const SESSION_GAP_MS = 30 * 60 * 1000; // 30-minute inactivity = new session
+
+/**
+ * Record a request row in api_requests and update the user's session +
+ * last_seen_at. Called at the end of each tracked endpoint handler.
+ * Non-blocking: errors are swallowed so analytics never break product flows.
+ */
+async function trackRequest({ endpoint, method = 'POST', userId = null, responseTimeMs, statusCode, source = null }) {
+  try {
+    let sessionId = null;
+
+    if (userId) {
+      // Update last_seen_at on the user row
+      await supabase.from('users').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
+
+      // Find the most recent open session for this user
+      const { data: openSession } = await supabase
+        .from('user_sessions')
+        .select('id, session_start, action_count, query_count')
+        .eq('user_id', userId)
+        .is('session_end', null)
+        .order('session_start', { ascending: false })
+        .limit(1)
+        .single();
+
+      const now = new Date();
+
+      if (openSession) {
+        const elapsed = now - new Date(openSession.session_start);
+        if (elapsed <= SESSION_GAP_MS) {
+          // Continue existing session
+          const isChat = endpoint === '/api/chat';
+          await supabase.from('user_sessions').update({
+            session_end:  now.toISOString(),
+            action_count: openSession.action_count + 1,
+            query_count:  openSession.query_count + (isChat ? 1 : 0),
+            duration_secs: elapsed / 1000,
+          }).eq('id', openSession.id);
+          sessionId = openSession.id;
+        } else {
+          // Gap exceeded — close old session, open new one
+          await supabase.from('user_sessions').update({
+            session_end:  new Date(new Date(openSession.session_start).getTime() + elapsed).toISOString(),
+            duration_secs: elapsed / 1000,
+          }).eq('id', openSession.id);
+
+          const { data: newSess } = await supabase
+            .from('user_sessions')
+            .insert({ user_id: userId, session_start: now.toISOString(), action_count: 1, query_count: endpoint === '/api/chat' ? 1 : 0 })
+            .select('id').single();
+          sessionId = newSess?.id || null;
+        }
+      } else {
+        // No open session — create one
+        const { data: newSess } = await supabase
+          .from('user_sessions')
+          .insert({ user_id: userId, session_start: now.toISOString(), action_count: 1, query_count: endpoint === '/api/chat' ? 1 : 0 })
+          .select('id').single();
+        sessionId = newSess?.id || null;
+      }
+    }
+
+    // Write the api_requests row
+    await supabase.from('api_requests').insert({
+      endpoint,
+      method,
+      user_id:          userId,
+      session_id:       sessionId,
+      response_time_ms: responseTimeMs,
+      status_code:      statusCode,
+      source,
+    });
+  } catch (err) {
+    // Analytics must never break the main product flow
+    console.warn('[analytics] trackRequest error (non-fatal):', err?.message);
+  }
+}
+
 // ─── Health check ────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -46,16 +126,27 @@ app.get('/health', (_req, res) => {
 app.post('/api/auth/google', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token is required' });
+  const t0 = Date.now();
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const p = ticket.getPayload();
-    res.json({ user: { id: p.sub, name: p.name, email: p.email, avatar: p.picture } });
+    const user = { id: p.sub, name: p.name, email: p.email, avatar: p.picture };
+
+    // Upsert user row (creates on first login, refreshes avatar on return)
+    await supabase.from('users').upsert({
+      id: p.sub, name: p.name, email: p.email, avatar: p.picture,
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+
+    res.json({ user });
+    trackRequest({ endpoint: '/api/auth/google', userId: p.sub, responseTimeMs: Date.now() - t0, statusCode: 200 });
   } catch (err) {
     console.error('Google auth error:', err);
     res.status(401).json({ error: 'Invalid token' });
+    trackRequest({ endpoint: '/api/auth/google', userId: null, responseTimeMs: Date.now() - t0, statusCode: 401 });
   }
 });
 
@@ -249,8 +340,9 @@ async function storeDiscoveredEvents(events) {
 // ─── POST /api/chat — Main query endpoint ────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
-  const { query } = req.body;
+  const { query, user_id } = req.body;
   if (!query) return res.status(400).json({ error: 'query is required' });
+  const t0 = Date.now();
 
   const currentDateTime = new Date().toLocaleString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -265,7 +357,9 @@ app.post('/api/chat', async (req, res) => {
     if (cached) {
       console.log(`[cache HIT] "${query}"`);
       const events = await fetchEventsByIds(cached.event_ids);
-      return res.json({ text: cached.result_text, events, source: 'cache' });
+      res.json({ text: cached.result_text, events, source: 'cache' });
+      trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'cache' });
+      return;
     }
 
     console.log(`[cache MISS] "${query}" — running embedding search`);
@@ -313,13 +407,18 @@ app.post('/api/chat', async (req, res) => {
       return e;
     });
 
+    // Determine source label for analytics
+    const responseSource = matchedEvents?.length >= 3 ? 'claude'
+      : (matchedEvents?.length >= 2 ? 'embedding' : 'websearch');
+
     // ── Save to cache ─────────────────────────────────────────────────
     await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
 
-    return res.json({
+    res.json({
       text: result.text || 'Checking the local scene...',
       events: rawEvents,
     });
+    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: responseSource });
 
   } catch (error) {
     console.error('Chat endpoint error:', error);
@@ -328,6 +427,7 @@ app.post('/api/chat', async (req, res) => {
       text: 'Connection bumpy. Try again?',
       events: [],
     });
+    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 500, source: null });
   }
 });
 
@@ -471,6 +571,97 @@ app.get('/api/saved-events', async (req, res) => {
     })),
     total: active.length,
   });
+});
+
+// ─── GET /api/admin/telemetry — live metrics for dashboard ───────────
+//
+// Returns the most recent platform_metrics_snapshots row plus a few
+// real-time counts computed inline (supply mix comes from kickflip_events
+// directly so it's always fresh).
+
+app.get('/api/admin/telemetry', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    // Latest snapshot (may be null on first deploy before any snapshot is taken)
+    const { data: snap } = await supabase
+      .from('platform_metrics_snapshots')
+      .select('*')
+      .order('computed_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Real-time supply counts (always fresh — cheap query)
+    const { data: supplyRows } = await supabase
+      .from('kickflip_events')
+      .select('origin', { count: 'exact' })
+      .eq('status', 'active');
+
+    const totalEvents  = supplyRows?.length ?? 0;
+    const userEvents   = supplyRows?.filter(r => r.origin === 'user').length ?? 0;
+    const crawlEvents  = supplyRows?.filter(r => r.origin === 'crawl').length ?? 0;
+    const providerPct  = totalEvents > 0 ? Math.round(userEvents  / totalEvents * 100) : 0;
+    const crawlerPct   = totalEvents > 0 ? Math.round(crawlEvents / totalEvents * 100) : 0;
+
+    // Format interaction time as "Xm Ys"
+    const avgSecs = snap?.avg_interaction_secs ?? null;
+    const interactionTime = avgSecs
+      ? `${Math.floor(avgSecs / 60)}m ${Math.floor(avgSecs % 60)}s`
+      : null;
+
+    return res.json({
+      // From latest snapshot (may be slightly stale — refreshes every 5 min)
+      mau:              snap?.mau               ?? 0,
+      unique_users:     snap?.unique_users_total ?? 0,
+      new_users_today:  snap?.new_users_today    ?? 0,
+      interaction_time: interactionTime,
+      avg_response_ms:  snap?.avg_response_time_ms  ? Math.round(snap.avg_response_time_ms) : null,
+      p95_response_ms:  snap?.p95_response_time_ms  ? Math.round(snap.p95_response_time_ms) : null,
+      queries_today:    snap?.total_queries_today  ?? 0,
+      cache_hit_rate:   snap?.cache_hit_rate_pct   ?? 0,
+      active_sessions:  snap?.active_sessions_now  ?? 0,
+      sessions_today:   snap?.total_sessions_today ?? 0,
+      computed_at:      snap?.computed_at           ?? null,
+
+      // Always real-time supply mix
+      total_events:  totalEvents,
+      user_events:   userEvents,
+      crawl_events:  crawlEvents,
+      provider_pct:  providerPct,
+      crawler_pct:   crawlerPct,
+    });
+  } catch (err) {
+    console.error('[telemetry] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/admin/metrics/snapshot — compute & store a snapshot ───
+//
+// Called by Railway cron every 5 minutes:
+//   POST /api/admin/metrics/snapshot   Authorization: Bearer <CRON_SECRET>
+// Also callable on-demand from the admin dashboard.
+
+app.post('/api/admin/metrics/snapshot', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const crawlSourcesCount = req.body?.crawl_sources_count ?? 0;
+    const { data, error } = await supabase.rpc('compute_platform_metrics', {
+      p_crawl_sources_count: crawlSourcesCount,
+    });
+    if (error) throw new Error(error.message);
+    return res.json({ success: true, snapshot_id: data, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[metrics/snapshot] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────
