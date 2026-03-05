@@ -4,6 +4,7 @@ import { User, EventDraft, VibemojiConfig, KickflipEvent } from '../types';
 import { EventCard } from './EventCard';
 import { IdentityCustomizer } from './IdentityCustomizer';
 import { draftToEvent } from '../constants';
+import { trackClick } from '../services/trackClick';
 
 interface ProfileViewProps {
   user: User;
@@ -148,6 +149,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setSavedLoading(false);
     }
   }, [user?.id]);
+
+  const handleUnsaveFromProfile = async (eventId: string) => {
+    // Optimistic: remove from UI + localStorage immediately
+    setSavedEvents(prev => prev.filter(e => e.id !== eventId));
+    localStorage.removeItem(`kickflip_saved_${eventId}`);
+    trackClick({ event_id: eventId, action: 'unsave', user_id: user.id, source: 'saved' });
+
+    const apiBase = (import.meta as any).env?.VITE_API_URL;
+    if (!user?.id || !apiBase) return;
+    try {
+      await fetch(`${apiBase}/api/saved-events/${encodeURIComponent(eventId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+    } catch (err) {
+      console.warn('[profile:unsave] API call failed:', err);
+    }
+  };
 
   const handleSaveProfile = () => {
       onUpdateUser({
@@ -336,45 +356,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           <div className="h-px bg-white/10 w-full" />
 
-          {/* --- EVENTS SECTION --- */}
-          <div className="space-y-10">
-              {upcoming.length > 0 && (
-                  <section>
-                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
-                          Upcoming Drops
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {upcoming.map(evt => (
-                              <EventCard key={evt.id} event={evt} className="w-full h-80" onClick={() => {}} />
-                          ))}
-                      </div>
-                  </section>
-              )}
-
-              {past.length > 0 && (
-                  <section>
-                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
-                          Past Drops
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-60 hover:opacity-100 transition-opacity">
-                          {past.map(evt => (
-                              <EventCard key={evt.id} event={evt} className="w-full h-80 grayscale hover:grayscale-0 transition-all" onClick={() => {}} />
-                          ))}
-                      </div>
-                  </section>
-              )}
-              
-              {upcoming.length === 0 && past.length === 0 && (
-                  <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">
-                      <p className="text-white/30 font-bold uppercase tracking-widest text-xs">No events yet</p>
-                  </div>
-              )}
-          </div>
-
-          <div className="h-px bg-white/10 w-full" />
-
           {/* --- SAVED EVENTS SECTION --- */}
           <div className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 flex items-center gap-2">
@@ -404,8 +385,58 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {!savedLoading && savedEvents.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                       {savedEvents.map(evt => (
-                          <EventCard key={evt.id} event={evt} className="w-full h-[270px]" onClick={() => {}} />
+                          <div key={evt.id} className="relative group/saved">
+                              <EventCard event={evt} className="w-full h-[270px]" onClick={() => {}} />
+                              <button
+                                  onClick={(e) => { e.stopPropagation(); handleUnsaveFromProfile(evt.id); }}
+                                  className="absolute top-2 right-2 z-20 w-7 h-7 rounded-full bg-black/60 hover:bg-red-500/80 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover/saved:opacity-100 transition-all"
+                                  title="Remove from saved"
+                              >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                              </button>
+                          </div>
                       ))}
+                  </div>
+              )}
+          </div>
+
+          <div className="h-px bg-white/10 w-full" />
+
+          {/* --- EVENTS SECTION --- */}
+          <div className="space-y-10">
+              {upcoming.length > 0 && (
+                  <section>
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
+                          Upcoming Drops
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {upcoming.map(evt => (
+                              <EventCard key={evt.id} event={evt} className="w-full h-80" onClick={() => {}} />
+                          ))}
+                      </div>
+                  </section>
+              )}
+
+              {past.length > 0 && (
+                  <section>
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
+                          Past Drops
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-60 hover:opacity-100 transition-opacity">
+                          {past.map(evt => (
+                              <EventCard key={evt.id} event={evt} className="w-full h-80 grayscale hover:grayscale-0 transition-all" onClick={() => {}} />
+                          ))}
+                      </div>
+                  </section>
+              )}
+
+              {upcoming.length === 0 && past.length === 0 && (
+                  <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">
+                      <p className="text-white/30 font-bold uppercase tracking-widest text-xs">No events yet</p>
                   </div>
               )}
           </div>
