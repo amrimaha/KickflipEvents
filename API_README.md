@@ -17,12 +17,13 @@ Protected endpoints require an `Authorization: Bearer <CRON_SECRET>` header.
 5. [Events (CRUD)](#5-events-crud)
 6. [User Profile](#6-user-profile)
 7. [Clickstream Tracking](#7-clickstream-tracking)
-8. [Crawl](#8-crawl)
-9. [Seed](#9-seed)
-10. [Admin](#10-admin)
-11. [Error Responses](#11-error-responses)
-12. [Environment Variables](#12-environment-variables)
-13. [Data Models](#13-data-models)
+8. [Chat Sessions](#8-chat-sessions)
+9. [Crawl](#9-crawl)
+10. [Seed](#10-seed)
+11. [Admin](#11-admin)
+12. [Error Responses](#12-error-responses)
+13. [Environment Variables](#13-environment-variables)
+14. [Data Models](#14-data-models)
 
 ---
 
@@ -583,7 +584,166 @@ The nightly cron should run in this order:
 
 ---
 
-## 8. Crawl
+## 8. Chat Sessions
+
+Chat history is stored server-side with the user's real `user_id` **never** written
+to the database. The backend converts it to `user_pseudo_id = HMAC-SHA256(user_id, PSEUDONYM_SECRET)`
+so DB consumers see only an opaque token and cannot link chats to real accounts.
+
+Anonymous users may pass `anon_id` instead; their sessions are stored without any identity link.
+
+---
+
+### `POST /api/chats`
+
+Create a new chat thread and open its first session atomically.
+
+**Body**
+```json
+{
+  "user_id": "google-oauth-uuid",
+  "anon_id": "browser-fingerprint",
+  "title":   "What's happening this weekend?"
+}
+```
+`user_id` **or** `anon_id` is required; `title` is the first user message (max 100 chars).
+
+**Response `201`**
+```json
+{ "chat_id": "uuid", "session_id": "uuid" }
+```
+
+---
+
+### `GET /api/chats?user_id=<uuid>`
+
+List all non-archived chats for a user, newest first (max 50).
+
+**Response `200`**
+```json
+{
+  "chats": [
+    {
+      "id":              "uuid",
+      "title":           "What's happening this weekend?",
+      "updated_at":      "2026-03-05T12:00:00Z",
+      "last_session_id": "uuid",
+      "session_count":   2
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/chats/:chatId?user_id=<uuid>`
+
+Return the full message history for a chat (all sessions, ordered chronologically).
+Ownership is verified via the pseudonymized `user_id`.
+
+**Response `200`**
+```json
+{
+  "chat_id":  "uuid",
+  "title":    "What's happening this weekend?",
+  "messages": [
+    {
+      "id":         "uuid",
+      "session_id": "uuid",
+      "role":       "user",
+      "content":    "What's happening this weekend?",
+      "event_urls": [],
+      "event_ids":  [],
+      "seq":        0,
+      "created_at": "2026-03-05T12:00:00Z"
+    },
+    {
+      "role":       "assistant",
+      "content":    "Here are the top picks for Seattle this weekend…",
+      "event_urls": ["https://ra.co/events/...", "https://eventbrite.com/..."],
+      "event_ids":  ["evt-abc123"],
+      "seq":        1
+    }
+  ]
+}
+```
+
+---
+
+### `POST /api/chats/:chatId/sessions`
+
+Start a new session on an existing chat (user resumed a past conversation).
+
+**Body**
+```json
+{ "user_id": "google-oauth-uuid" }
+```
+
+**Response `201`**
+```json
+{ "session_id": "uuid", "session_num": 2 }
+```
+
+---
+
+### `PUT /api/chats/:chatId/sessions/:sessionId/end`
+
+Mark a session as ended. Called when the user starts a new chat or closes the tab.
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### `POST /api/chats/:chatId/sessions/:sessionId/messages`
+
+Append messages (one turn = user + assistant pair) to the active session.
+`event_urls` captures external event links surfaced by the assistant — critical for
+ephemeral AI-search events that are never persisted to `kickflip_events`.
+
+**Body**
+```json
+{
+  "messages": [
+    { "role": "user",      "content": "Any jazz shows tonight?" },
+    {
+      "role":       "assistant",
+      "content":    "Found 3 jazz events in Capitol Hill…",
+      "event_urls": ["https://ra.co/events/12345"],
+      "event_ids":  ["evt-abc"]
+    }
+  ]
+}
+```
+
+**Response `201`**
+```json
+{ "ok": true, "stored": 2 }
+```
+
+---
+
+### Privacy & Encryption Design
+
+| What is stored | How |
+|---|---|
+| `user_id` in chat tables | Never — replaced by `HMAC-SHA256(user_id, PSEUDONYM_SECRET)` |
+| Chat content (`content`) | Plaintext — identity link is broken by pseudonymization |
+| `event_urls` / `event_ids` | Plaintext — not PII |
+| `anon_id` | Plaintext — no PII, browser fingerprint only |
+
+**Recommendation engine access:** The Railway backend derives the same HMAC token
+from a user's session `user_id` and queries `chat_messages` for personalization signals.
+No key is stored in the database — only the derived token.
+
+**Required env var (Railway):** `PSEUDONYM_SECRET` — a random 32-byte hex string.
+Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+
+---
+
+## 9. Crawl
 
 ### `POST /api/crawl`
 
@@ -613,7 +773,7 @@ embeddings. Window: today → +7 days.
 
 ---
 
-## 9. Seed
+## 10. Seed
 
 ### `POST /api/seed`
 
@@ -636,7 +796,7 @@ One-time operation: embeds all existing `kickflip_events` rows that have no
 
 ---
 
-## 10. Admin
+## 11. Admin
 
 Admin endpoints require the caller's `is_super_admin` flag to be `true` in the
 `users` table. Pass `admin_id` in the request body for UI callers; machine
@@ -797,7 +957,7 @@ Audit trail of all admin actions.
 
 ---
 
-## 11. Error Responses
+## 12. Error Responses
 
 All error responses follow this shape:
 
@@ -815,7 +975,7 @@ All error responses follow this shape:
 
 ---
 
-## 12. Environment Variables
+## 13. Environment Variables
 
 ### Railway (backend)
 
@@ -840,7 +1000,7 @@ All error responses follow this shape:
 
 ---
 
-## 13. Data Models
+## 14. Data Models
 
 ### `KickflipEvent`
 

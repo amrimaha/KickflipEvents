@@ -170,17 +170,23 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
           
           {chatHistory.length > 0 ? (
             <div className="flex flex-col gap-1">
-              {chatHistory.map((session) => (
+              {chatHistory.map((session: ChatSession) => (
                 <button
                   key={session.id}
                   onClick={() => onSelectSession(session)}
                   className="text-left px-4 py-3 rounded-lg hover:bg-white/5 transition-all group border border-transparent hover:border-white/5"
                 >
-                  <p 
+                  <p
                     className="font-medium text-sm line-clamp-1 transition-colors hover:brightness-125"
                     style={{ color: accentColor }}
                   >
                     {session.preview}
+                  </p>
+                  <p className="text-white/30 text-xs mt-0.5 flex items-center gap-1.5">
+                    <span>{new Date(session.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                    {session.sessionNum && session.sessionNum > 1 && (
+                      <span className="opacity-60">· {session.sessionNum} sessions</span>
+                    )}
                   </p>
                 </button>
               ))}

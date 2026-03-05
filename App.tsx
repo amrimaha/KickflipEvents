@@ -17,6 +17,7 @@ import { ChatMessage, KickflipEvent, LoadingState, ThemeConfig, User, ChatSessio
 import { searchSeattleEvents } from './services/claudeService';
 import { BACKGROUND_OPTIONS, FEATURED_EVENTS, CATEGORY_COLORS, DEFAULT_INITIAL_DRAFT, draftToEvent } from './constants';
 import { fetchRemoteEvents, fetchEventById, syncEventToRemote, deleteRemoteEvent, isBackendConfigured, subscribeToEvents, unsubscribeEvents, getBackendDiagnostics } from './services/supabaseClient';
+import { apiCreateChat, apiStartSession, apiEndSession, apiStoreMessages, apiLoadChatHistory, apiLoadChatMessages } from './services/chatHistoryService';
 
 const QUESTION_PROMPTS = [
   "What's happening tonight?",
@@ -289,6 +290,9 @@ const App: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>(Date.now().toString());
+  // Backend chat/session IDs — null until the first message of a new chat is sent
+  const [activeChatId, setActiveChatId]       = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
@@ -602,24 +606,45 @@ const App: React.FC = () => {
     localStorage.setItem('kickflip_brand_identity', JSON.stringify(brandIdentity));
   }, [brandIdentity]);
 
+  // Load chat history: backend for logged-in users, localStorage for guests
   useEffect(() => {
-    const key = getHistoryKey(user);
-    const savedHistory = localStorage.getItem(key);
-    if (savedHistory) {
-      try {
-        setChatHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        setChatHistory([]);
-      }
+    if (user) {
+      apiLoadChatHistory(user.id).then(sessions => {
+        if (sessions.length > 0) {
+          setChatHistory(sessions);
+        } else {
+          // Fallback: migrate any localStorage history from before backend was added
+          const key = getHistoryKey(user);
+          const saved = localStorage.getItem(key);
+          setChatHistory(saved ? JSON.parse(saved) : []);
+        }
+      });
     } else {
-        setChatHistory([]);
+      const key = getHistoryKey(null);
+      const saved = localStorage.getItem(key);
+      setChatHistory(saved ? JSON.parse(saved) : []);
     }
   }, [user]);
 
+  // Guest-only: persist history to localStorage (logged-in users persist via API)
   useEffect(() => {
-    const key = getHistoryKey(user);
-    localStorage.setItem(key, JSON.stringify(chatHistory));
+    if (!user) {
+      const key = getHistoryKey(null);
+      localStorage.setItem(key, JSON.stringify(chatHistory));
+    }
   }, [chatHistory, user]);
+
+  // End the active backend session when the user closes or navigates away from the tab.
+  // keepalive:true in apiEndSession ensures the fetch completes even during unload.
+  useEffect(() => {
+    const onUnload = () => {
+      if (activeChatId && activeSessionId) {
+        apiEndSession(activeChatId, activeSessionId);
+      }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [activeChatId, activeSessionId]);
 
   // Track scroll to: (a) add backdrop to header, (b) swap to category filter bar
   useEffect(() => {
@@ -694,15 +719,17 @@ const App: React.FC = () => {
       }
   };
 
+  // Save current in-memory session to local chatHistory list (guests only —
+  // logged-in users are persisted message-by-message via the backend API).
   const saveCurrentSession = () => {
-    if (messages.length > 1) {
+    if (messages.length > 1 && !user) {
       const firstUserMsg = messages.find(m => m.role === 'user');
       const previewText = firstUserMsg ? firstUserMsg.text : 'New Conversation';
       const newSession: ChatSession = {
-        id: currentSessionId,
+        id:        currentSessionId,
         timestamp: Date.now(),
-        preview: previewText,
-        messages: [...messages]
+        preview:   previewText,
+        messages:  [...messages],
       };
       setChatHistory(prev => {
         const filtered = prev.filter(s => s.id !== currentSessionId);
@@ -712,15 +739,20 @@ const App: React.FC = () => {
   };
 
   const startNewChat = () => {
+    // End the active backend session (fire-and-forget, survives if tab closes)
+    if (activeChatId && activeSessionId) {
+      apiEndSession(activeChatId, activeSessionId);
+    }
+    setActiveChatId(null);
+    setActiveSessionId(null);
+
     saveCurrentSession();
     setCurrentSessionId(Date.now().toString());
-    
+
     if (user?.name) {
-        setMessages([{ role: 'model', text: getPersonalizedGreeting(user.name) }]);
+      setMessages([{ role: 'model', text: getPersonalizedGreeting(user.name) }]);
     } else {
-        setMessages([
-          { role: 'model', text: "Your City. Unlocked" }
-        ]);
+      setMessages([{ role: 'model', text: "Your City. Unlocked" }]);
     }
 
     setSuggestionChips(generateSessionChips());
@@ -735,20 +767,82 @@ const App: React.FC = () => {
     setIsDrawerOpen(false);
   };
 
-  const handleLoadSession = (session: ChatSession) => {
-    saveCurrentSession();
-    setCurrentSessionId(session.id);
-    setMessages(session.messages);
-    const lastMsg = session.messages[session.messages.length - 1];
-    if (lastMsg.events) {
-      setCurrentEvents(lastMsg.events);
-    } else {
-      setCurrentEvents([]);
+  const handleLoadSession = async (session: ChatSession) => {
+    // End the active backend session before switching
+    if (activeChatId && activeSessionId) {
+      apiEndSession(activeChatId, activeSessionId);
     }
-    setLoadingState(LoadingState.IDLE);
-    setCurrentView('home');
+    setActiveChatId(null);
+    setActiveSessionId(null);
+
+    saveCurrentSession();
     setIsDrawerOpen(false);
+    setCurrentView('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (session.chatId && user) {
+      // Load full message history from backend then open a new session on this chat
+      setLoadingState(LoadingState.SEARCHING);
+      const backendMsgs = await apiLoadChatMessages(session.chatId, user.id);
+      const restored: ChatMessage[] = backendMsgs.length > 0
+        ? backendMsgs
+        : session.messages; // fallback to in-memory if backend empty
+
+      setMessages(restored.length > 0 ? restored : [{ role: 'model', text: getPersonalizedGreeting(user.name) }]);
+      setCurrentEvents([]);
+      setLoadingState(LoadingState.IDLE);
+
+      // Open a new session tied to this chat so future messages are grouped correctly
+      const newSession = await apiStartSession(session.chatId, user.id);
+      if (newSession) {
+        setActiveChatId(session.chatId);
+        setActiveSessionId(newSession.sessionId);
+      }
+    } else {
+      // Guest or local-only session
+      setMessages(session.messages);
+      const lastMsg = session.messages[session.messages.length - 1];
+      setCurrentEvents(lastMsg?.events ?? []);
+      setLoadingState(LoadingState.IDLE);
+    }
+
+    setCurrentSessionId(session.id);
+  };
+
+  // Persist a user+model turn to the backend. Lazy-creates chat+session on
+  // the first turn of a new chat. Fire-and-forget — never blocks the UI.
+  const persistChatTurn = async (
+    userText: string,
+    result:   { text: string; events: KickflipEvent[] },
+  ) => {
+    if (!user) return; // guests: localStorage only
+
+    let chatId    = activeChatId;
+    let sessionId = activeSessionId;
+
+    if (!chatId || !sessionId) {
+      // First turn of a new chat — create the thread + session together
+      const created = await apiCreateChat(user.id, userText);
+      if (!created) return;
+      chatId    = created.chatId;
+      sessionId = created.sessionId;
+      setActiveChatId(chatId);
+      setActiveSessionId(sessionId);
+
+      // Prepend to the history list immediately so the drawer updates
+      const stub: ChatSession = {
+        id:        sessionId,
+        chatId,
+        sessionId,
+        sessionNum: 1,
+        timestamp:  Date.now(),
+        preview:    userText.slice(0, 80),
+        messages:   [],
+      };
+      setChatHistory(prev => [stub, ...prev.filter((s: ChatSession) => s.chatId !== chatId)]);
+    }
+
+    await apiStoreMessages(chatId, sessionId, userText, result.text, result.events);
   };
 
   const generateUUID = () => {
@@ -886,6 +980,8 @@ const App: React.FC = () => {
       setMessages(prev => [...prev, modelMsg]);
       setCurrentEvents(result.events);
       setLoadingState(LoadingState.COMPLETE);
+      // Persist to backend (fire-and-forget) — only for logged-in users
+      persistChatTurn(text, result);
     } catch (error) {
       setMessages(prev => [...prev, { role: 'model', text: "My bad, I tripped up finding that. Try again?" }]);
       setLoadingState(LoadingState.ERROR);

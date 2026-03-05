@@ -34,7 +34,7 @@ const supabase     = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'DELETE', 'PATCH', 'OPTIONS'] }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] }));
 app.options('*', cors()); // respond to CORS preflight for all routes
 app.use(express.json({ limit: '2mb' }));
 
@@ -718,6 +718,258 @@ app.post('/api/events/click', async (req, res) => {
     return res.status(201).json({ ok: true });
   } catch (err) {
     console.error('[events/click] unexpected error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Chat Session API ─────────────────────────────────────────────────────────
+//
+// Privacy design: the real user UUID is NEVER stored in chat tables.
+// pseudonymize() converts it to a deterministic HMAC-SHA256 token using
+// PSEUDONYM_SECRET (Railway env var). DB consumers see only the token;
+// the backend can always re-derive the same token to look up a user's chats.
+//
+// Anonymous users: anon_id (browser fingerprint) is stored directly —
+// anonymous sessions carry no PII so no pseudonymization is needed.
+
+function pseudonymize(userId) {
+  const secret = process.env.PSEUDONYM_SECRET;
+  if (!secret) {
+    console.warn('[chat] PSEUDONYM_SECRET not set — user_id stored as-is in dev');
+    return String(userId);
+  }
+  return crypto.createHmac('sha256', secret).update(String(userId)).digest('hex');
+}
+
+// POST /api/chats
+// Create a new chat thread + its first session atomically.
+// Body: { user_id?, anon_id?, title }
+// Returns: { chat_id, session_id }
+app.post('/api/chats', async (req, res) => {
+  const { user_id, anon_id, title } = req.body || {};
+  if (!user_id && !anon_id) {
+    return res.status(400).json({ error: 'user_id or anon_id required' });
+  }
+
+  const pseudo = user_id ? pseudonymize(user_id) : null;
+  const now    = new Date().toISOString();
+
+  try {
+    const { data: chat, error: chatErr } = await supabase
+      .from('chats')
+      .insert({
+        user_pseudo_id: pseudo,
+        anon_id:        anon_id || null,
+        title:          (title || 'New Chat').slice(0, 100),
+        created_at:     now,
+        updated_at:     now,
+      })
+      .select('id')
+      .single();
+    if (chatErr) return res.status(500).json({ error: chatErr.message });
+
+    const { data: session, error: sessErr } = await supabase
+      .from('chat_sessions')
+      .insert({
+        chat_id:        chat.id,
+        user_pseudo_id: pseudo,
+        anon_id:        anon_id || null,
+        session_num:    1,
+        started_at:     now,
+      })
+      .select('id')
+      .single();
+    if (sessErr) return res.status(500).json({ error: sessErr.message });
+
+    return res.status(201).json({ chat_id: chat.id, session_id: session.id });
+  } catch (err) {
+    console.error('[chats/create]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/chats?user_id=...
+// List all non-archived chats for a user, newest first.
+// Returns: { chats: [{ id, title, updated_at, last_session_id, session_count }] }
+app.get('/api/chats', async (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ error: 'user_id required' });
+
+  const pseudo = pseudonymize(String(user_id));
+
+  try {
+    const { data: chats, error } = await supabase
+      .from('chats')
+      .select('id, title, created_at, updated_at')
+      .eq('user_pseudo_id', pseudo)
+      .eq('is_archived', false)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Enrich each chat with its latest session id and total session count
+    const enriched = await Promise.all((chats || []).map(async (c) => {
+      const { data: sessions, count } = await supabase
+        .from('chat_sessions')
+        .select('id, session_num', { count: 'exact' })
+        .eq('chat_id', c.id)
+        .order('session_num', { ascending: false })
+        .limit(1);
+      return {
+        ...c,
+        last_session_id: sessions?.[0]?.id   || null,
+        session_count:   count                || 1,
+      };
+    }));
+
+    return res.json({ chats: enriched });
+  } catch (err) {
+    console.error('[chats/list]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/chats/:chatId?user_id=...
+// Return all messages for a chat (across all sessions), ordered chronologically.
+// Ownership is verified via the pseudonymized user_id.
+// Returns: { chat_id, title, messages: [{ role, content, event_urls, event_ids, seq, created_at }] }
+app.get('/api/chats/:chatId', async (req, res) => {
+  const { chatId } = req.params;
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ error: 'user_id required' });
+
+  const pseudo = pseudonymize(String(user_id));
+
+  try {
+    const { data: chat, error: chatErr } = await supabase
+      .from('chats')
+      .select('id, title')
+      .eq('id', chatId)
+      .eq('user_pseudo_id', pseudo)
+      .single();
+    if (chatErr || !chat) return res.status(404).json({ error: 'Chat not found' });
+
+    const { data: messages, error: msgErr } = await supabase
+      .from('chat_messages')
+      .select('id, session_id, role, content, event_urls, event_ids, seq, created_at')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true })
+      .order('seq',        { ascending: true });
+    if (msgErr) return res.status(500).json({ error: msgErr.message });
+
+    return res.json({ chat_id: chatId, title: chat.title, messages: messages || [] });
+  } catch (err) {
+    console.error('[chats/get]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/chats/:chatId/sessions
+// Start a new session on an existing chat (user resumed a past chat).
+// Body: { user_id }
+// Returns: { session_id, session_num }
+app.post('/api/chats/:chatId/sessions', async (req, res) => {
+  const { chatId } = req.params;
+  const { user_id } = req.body || {};
+  if (!user_id) return res.status(400).json({ error: 'user_id required' });
+
+  const pseudo = pseudonymize(String(user_id));
+
+  try {
+    // Verify ownership
+    const { data: chat, error: chatErr } = await supabase
+      .from('chats')
+      .select('id')
+      .eq('id', chatId)
+      .eq('user_pseudo_id', pseudo)
+      .single();
+    if (chatErr || !chat) return res.status(404).json({ error: 'Chat not found' });
+
+    // Count existing sessions to set session_num
+    const { count } = await supabase
+      .from('chat_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('chat_id', chatId);
+
+    const sessionNum = (count || 0) + 1;
+    const now        = new Date().toISOString();
+
+    const { data: session, error: sessErr } = await supabase
+      .from('chat_sessions')
+      .insert({ chat_id: chatId, user_pseudo_id: pseudo, session_num: sessionNum, started_at: now })
+      .select('id')
+      .single();
+    if (sessErr) return res.status(500).json({ error: sessErr.message });
+
+    await supabase.from('chats').update({ updated_at: now }).eq('id', chatId);
+
+    return res.status(201).json({ session_id: session.id, session_num: sessionNum });
+  } catch (err) {
+    console.error('[chats/sessions/create]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/chats/:chatId/sessions/:sessionId/end
+// Mark a session as ended (sets ended_at = now).
+// No auth check here — the chatId + sessionId pair acts as an implicit token.
+app.put('/api/chats/:chatId/sessions/:sessionId/end', async (req, res) => {
+  const { chatId, sessionId } = req.params;
+  try {
+    await supabase
+      .from('chat_sessions')
+      .update({ ended_at: new Date().toISOString() })
+      .eq('id',      sessionId)
+      .eq('chat_id', chatId);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[chats/sessions/end]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/chats/:chatId/sessions/:sessionId/messages
+// Append one or more messages (a single turn = user + assistant pair) to a session.
+// Body: { messages: [{ role, content, event_urls?, event_ids? }] }
+// Returns: { ok: true, stored: N }
+app.post('/api/chats/:chatId/sessions/:sessionId/messages', async (req, res) => {
+  const { chatId, sessionId } = req.params;
+  const { messages } = req.body || {};
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'messages array required' });
+  }
+
+  try {
+    // Determine current seq offset so appended messages continue from the right index
+    const { count } = await supabase
+      .from('chat_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', sessionId);
+
+    let seq = count || 0;
+    const now = new Date().toISOString();
+
+    const rows = messages.map(m => ({
+      chat_id:    chatId,
+      session_id: sessionId,
+      role:       m.role === 'user' ? 'user' : 'assistant',
+      content:    String(m.content || ''),
+      event_urls: Array.isArray(m.event_urls) ? m.event_urls : [],
+      event_ids:  Array.isArray(m.event_ids)  ? m.event_ids  : [],
+      seq:        seq++,
+      created_at: now,
+    }));
+
+    const { error } = await supabase.from('chat_messages').insert(rows);
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Keep chat.updated_at fresh so list view sorts correctly
+    await supabase.from('chats').update({ updated_at: now }).eq('id', chatId);
+
+    return res.status(201).json({ ok: true, stored: rows.length });
+  } catch (err) {
+    console.error('[chats/messages/store]', err.message);
     return res.status(500).json({ error: err.message });
   }
 });

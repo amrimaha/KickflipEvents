@@ -72,10 +72,13 @@ export interface User {
 }
 
 export interface ChatSession {
-  id: string;
-  timestamp: number;
-  preview: string;
-  messages: ChatMessage[];
+  id:          string;   // local key (most-recent session UUID, or Date.now() for local-only)
+  chatId?:     string;   // backend chats.id (UUID) — present for backend-persisted chats
+  sessionId?:  string;   // backend chat_sessions.id for the latest session
+  sessionNum?: number;   // which session within this chat (1, 2, 3…)
+  timestamp:   number;
+  preview:     string;   // first user message, truncated
+  messages:    ChatMessage[];
 }
 
 export enum LoadingState {
