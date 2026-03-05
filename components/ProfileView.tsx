@@ -356,6 +356,139 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           <div className="h-px bg-white/10 w-full" />
 
+          {/* --- SETTINGS SECTION --- */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
+              <div>
+                  <div className="flex justify-between items-end mb-6">
+                     <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40">Profile Info</h3>
+                     {!isEditing && (
+                         <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-white/60 hover:text-white uppercase tracking-widest">Edit</button>
+                     )}
+                  </div>
+
+                  <div className="space-y-6">
+                      <div>
+                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Display Name</label>
+                          <input
+                             type="text"
+                             disabled={!isEditing}
+                             value={formData.name}
+                             onChange={(e) => setFormData({...formData, name: e.target.value})}
+                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all"
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Email</label>
+                          <input
+                             type="email"
+                             disabled={!isEditing}
+                             value={formData.email}
+                             onChange={(e) => setFormData({...formData, email: e.target.value})}
+                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all"
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Phone (Optional)</label>
+                          <input
+                             type="tel"
+                             disabled={!isEditing}
+                             value={formData.phone}
+                             onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                             placeholder="+1 (555) 000-0000"
+                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all placeholder-white/10"
+                          />
+                      </div>
+
+                      {isEditing && (
+                          <div className="flex gap-3 pt-2">
+                              <button onClick={handleSaveProfile} className="flex-1 py-3 bg-white text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-white/90">Save Changes</button>
+                              <button onClick={() => { setIsEditing(false); setFormData({name: user.name, email: user.email, phone: user.phoneNumber || ''}); }} className="px-6 py-3 bg-white/10 text-white font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-white/20">Cancel</button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+
+              <div className="space-y-12">
+                  <div>
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6">Notifications</h3>
+                      <div className="space-y-4">
+                          {[
+                              { key: 'eventUpdates', label: 'Event Updates' },
+                              { key: 'bookingConfirmations', label: 'Booking Confirmations' },
+                              { key: 'reminders', label: 'Reminders' },
+                              { key: 'productAnnouncements', label: 'Product Announcements' }
+                          ].map(({key, label}) => (
+                              <div key={key} className="flex justify-between items-center p-4 bg-white/5 border border-white/5 rounded-xl">
+                                  <span className="text-sm font-medium text-white/80">{label}</span>
+                                  <button
+                                     onClick={() => toggleNotification(key as any)}
+                                     className={`w-10 h-6 rounded-full relative transition-colors ${preferences[key as keyof typeof preferences] ? 'bg-green-500' : 'bg-white/10'}`}
+                                  >
+                                      <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${preferences[key as keyof typeof preferences] ? 'left-5' : 'left-1'}`} />
+                                  </button>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-white/10 space-y-4">
+                      <div className="flex flex-wrap gap-6 text-xs font-bold text-white/40 uppercase tracking-widest">
+                          <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
+                          <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
+                          <a href="mailto:support@kickflip.co" className="hover:text-white transition-colors">Contact Support</a>
+                      </div>
+
+                      <button
+                         onClick={onLogout}
+                         className="w-full py-4 rounded-xl border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all mt-4"
+                      >
+                         Log Out
+                      </button>
+                  </div>
+              </div>
+          </section>
+
+          <div className="h-px bg-white/10 w-full" />
+
+          {/* --- EVENTS SECTION --- */}
+          <div className="space-y-10">
+              {upcoming.length > 0 && (
+                  <section>
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
+                          Upcoming Drops
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {upcoming.map(evt => (
+                              <EventCard key={evt.id} event={evt} className="w-full h-80" onClick={() => {}} />
+                          ))}
+                      </div>
+                  </section>
+              )}
+
+              {past.length > 0 && (
+                  <section>
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
+                          Past Drops
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-60 hover:opacity-100 transition-opacity">
+                          {past.map(evt => (
+                              <EventCard key={evt.id} event={evt} className="w-full h-80 grayscale hover:grayscale-0 transition-all" onClick={() => {}} />
+                          ))}
+                      </div>
+                  </section>
+              )}
+
+              {upcoming.length === 0 && past.length === 0 && (
+                  <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">
+                      <p className="text-white/30 font-bold uppercase tracking-widest text-xs">No events yet</p>
+                  </div>
+              )}
+          </div>
+
+          <div className="h-px bg-white/10 w-full" />
+
           {/* --- SAVED EVENTS SECTION --- */}
           <div className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 flex items-center gap-2">
@@ -401,139 +534,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
               )}
           </div>
-
-          <div className="h-px bg-white/10 w-full" />
-
-          {/* --- EVENTS SECTION --- */}
-          <div className="space-y-10">
-              {upcoming.length > 0 && (
-                  <section>
-                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
-                          Upcoming Drops
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {upcoming.map(evt => (
-                              <EventCard key={evt.id} event={evt} className="w-full h-80" onClick={() => {}} />
-                          ))}
-                      </div>
-                  </section>
-              )}
-
-              {past.length > 0 && (
-                  <section>
-                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6 flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
-                          Past Drops
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-60 hover:opacity-100 transition-opacity">
-                          {past.map(evt => (
-                              <EventCard key={evt.id} event={evt} className="w-full h-80 grayscale hover:grayscale-0 transition-all" onClick={() => {}} />
-                          ))}
-                      </div>
-                  </section>
-              )}
-
-              {upcoming.length === 0 && past.length === 0 && (
-                  <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">
-                      <p className="text-white/30 font-bold uppercase tracking-widest text-xs">No events yet</p>
-                  </div>
-              )}
-          </div>
-
-          <div className="h-px bg-white/10 w-full" />
-
-          {/* --- SETTINGS SECTION --- */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
-              <div>
-                  <div className="flex justify-between items-end mb-6">
-                     <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40">Profile Info</h3>
-                     {!isEditing && (
-                         <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-white/60 hover:text-white uppercase tracking-widest">Edit</button>
-                     )}
-                  </div>
-                  
-                  <div className="space-y-6">
-                      <div>
-                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Display Name</label>
-                          <input 
-                             type="text" 
-                             disabled={!isEditing}
-                             value={formData.name}
-                             onChange={(e) => setFormData({...formData, name: e.target.value})}
-                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all"
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Email</label>
-                          <input 
-                             type="email" 
-                             disabled={!isEditing}
-                             value={formData.email}
-                             onChange={(e) => setFormData({...formData, email: e.target.value})}
-                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all"
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-[9px] font-bold text-white/30 uppercase tracking-widest mb-2">Phone (Optional)</label>
-                          <input 
-                             type="tel" 
-                             disabled={!isEditing}
-                             value={formData.phone}
-                             onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                             placeholder="+1 (555) 000-0000"
-                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-white/30 transition-all placeholder-white/10"
-                          />
-                      </div>
-                      
-                      {isEditing && (
-                          <div className="flex gap-3 pt-2">
-                              <button onClick={handleSaveProfile} className="flex-1 py-3 bg-white text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-white/90">Save Changes</button>
-                              <button onClick={() => { setIsEditing(false); setFormData({name: user.name, email: user.email, phone: user.phoneNumber || ''}); }} className="px-6 py-3 bg-white/10 text-white font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-white/20">Cancel</button>
-                          </div>
-                      )}
-                  </div>
-              </div>
-
-              <div className="space-y-12">
-                  <div>
-                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white/40 mb-6">Notifications</h3>
-                      <div className="space-y-4">
-                          {[
-                              { key: 'eventUpdates', label: 'Event Updates' },
-                              { key: 'bookingConfirmations', label: 'Booking Confirmations' },
-                              { key: 'reminders', label: 'Reminders' },
-                              { key: 'productAnnouncements', label: 'Product Announcements' }
-                          ].map(({key, label}) => (
-                              <div key={key} className="flex justify-between items-center p-4 bg-white/5 border border-white/5 rounded-xl">
-                                  <span className="text-sm font-medium text-white/80">{label}</span>
-                                  <button 
-                                     onClick={() => toggleNotification(key as any)}
-                                     className={`w-10 h-6 rounded-full relative transition-colors ${preferences[key as keyof typeof preferences] ? 'bg-green-500' : 'bg-white/10'}`}
-                                  >
-                                      <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${preferences[key as keyof typeof preferences] ? 'left-5' : 'left-1'}`} />
-                                  </button>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div className="pt-6 border-t border-white/10 space-y-4">
-                      <div className="flex flex-wrap gap-6 text-xs font-bold text-white/40 uppercase tracking-widest">
-                          <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-                          <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-                          <a href="mailto:support@kickflip.co" className="hover:text-white transition-colors">Contact Support</a>
-                      </div>
-                      
-                      <button 
-                         onClick={onLogout}
-                         className="w-full py-4 rounded-xl border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all mt-4"
-                      >
-                         Log Out
-                      </button>
-                  </div>
-              </div>
-          </section>
 
       </div>
 
