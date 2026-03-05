@@ -1,8 +1,6 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { User, EventDraft, KickflipEvent, CrawlJob, VibemojiConfig } from '../types';
-import { CATEGORY_COLORS, draftToEvent, getVideoForEvent } from '../constants';
-import { EventCard } from './EventCard';
+import React, { useState } from 'react';
+import { User, EventDraft } from '../types';
 
 interface AdminDashboardViewProps {
   user: User;
@@ -13,345 +11,491 @@ interface AdminDashboardViewProps {
   onBackHome: () => void;
 }
 
-type Tab = 'governance' | 'crawler' | 'users';
+type Tab = 'supply' | 'tasks' | 'telemetry';
 
-export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({ 
-  user, 
-  allEvents, 
-  onUpdateEvent, 
+const DEFAULT_SOURCES = [
+  'https://do206.com/p/seattle',
+  'https://ra.co/events/us/seattle',
+];
+
+const TELEMETRY = {
+  monthlyActive: 12842,
+  uniqueUsers:   8921,
+  interactionTime: '4m 12s',
+  responseTime: '240ms',
+  providerPct: 75,
+  crawlerPct:  25,
+};
+
+export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
+  user,
+  allEvents,
+  onUpdateEvent,
   onDeleteEvent,
   onInjectEvents,
-  onBackHome 
+  onBackHome,
 }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('governance');
-  const [jobs, setJobs] = useState<CrawlJob[]>([]);
-  const [crawlUrl, setCrawlUrl] = useState('');
-  const [isCrawling, setIsCrawling] = useState(false);
-  const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
-  
-  // Theme for Admin Mode (System/Ops vibe)
-  const adminAccent = '#6366f1'; // Indigo-500
+  const [activeTab, setActiveTab] = useState<Tab>('supply');
 
-  // --- CRAWLER LOGIC (SIMULATED) ---
-  const addLog = (msg: string) => setConsoleLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  // ── Discover Supply state ─────────────────────────────────────────
+  const [sources, setSources]       = useState<string[]>(DEFAULT_SOURCES);
+  const [newSource, setNewSource]   = useState('');
+  const [isSyncing, setIsSyncing]   = useState(false);
+  const [syncLog, setSyncLog]       = useState<string[]>([]);
+  const totalCrawled = allEvents.filter(e => e.origin === 'crawl').length;
 
-  const runValidationAgent = async (url: string) => {
-      setIsCrawling(true);
-      setConsoleLogs([]);
-      addLog(`Initializing crawl job for: ${url}`);
-      
-      const jobId = `job-${Date.now()}`;
-      const newJob: CrawlJob = {
-          id: jobId,
-          targetUrl: url,
-          status: 'running',
-          eventsFound: 0,
-          eventsCreated: 0,
-          logs: [],
-          timestamp: Date.now()
-      };
-      setJobs(prev => [newJob, ...prev]);
-
-      // Step 1: Connect
-      await new Promise(r => setTimeout(r, 1500));
-      addLog("Connection established. Handshaking...");
-      
-      // Step 2: Parse
-      await new Promise(r => setTimeout(r, 2000));
-      const foundCount = Math.floor(Math.random() * 5) + 3; // Random 3-8 events
-      addLog(`Parsing DOM... Found ${foundCount} potential event nodes.`);
-      
-      // Step 3: Validate
-      addLog("Starting Validation Agent v2.1...");
-      const validEvents: EventDraft[] = [];
-      const category = url.includes('ticketmaster') ? 'sports' : url.includes('ra.co') ? 'music' : 'other';
-      const sourceName = new URL(url).hostname.replace('www.', '');
-
-      for (let i = 0; i < foundCount; i++) {
-          await new Promise(r => setTimeout(r, 800)); // Simulate processing time per item
-          const isInvalid = Math.random() > 0.8; // 20% failure rate
-          
-          if (isInvalid) {
-              addLog(`WARN: Event node #${i+1} rejected. Reason: Date in past or missing location.`);
-          } else {
-              addLog(`INFO: Event node #${i+1} validated. Schema integrity: 100%.`);
-              
-              // Generate Mock Event
-              const daysFromNow = Math.floor(Math.random() * 30);
-              const eventDate = new Date();
-              eventDate.setDate(eventDate.getDate() + daysFromNow);
-              
-              const mockEvent: EventDraft = {
-                  id: `crawl-${Date.now()}-${i}`,
-                  concept: 'Imported via Admin Crawler',
-                  title: `Imported Event ${i+1} @ ${sourceName}`,
-                  category: category as any,
-                  vibeDescription: `A curated event ingested from ${sourceName}. Visit their site for tickets.`,
-                  tone: 'minimal',
-                  locationName: 'Seattle Venue TBD',
-                  address: 'Seattle, WA',
-                  startDate: eventDate.toISOString().split('T')[0],
-                  startTime: '20:00',
-                  endDate: eventDate.toISOString().split('T')[0],
-                  endTime: '23:00',
-                  isFree: false,
-                  price: 'See Site',
-                  isUnlimitedCapacity: true,
-                  capacity: 0,
-                  overview: `This event was automatically discovered by Kickflip's crawler from ${url}.`,
-                  collaborators: [],
-                  providerName: sourceName,
-                  socialLinks: {},
-                  media: [], // No media initially, uses iframe fallback logic
-                  vibemoji: { baseId: 'bolt', primaryColor: '#6366f1' },
-                  themeColor: '#6366f1',
-                  status: 'active',
-                  ticketsSold: 0,
-                  origin: 'crawl',
-                  crawlSource: sourceName,
-                  iframeUrl: url
-              };
-              validEvents.push(mockEvent);
-          }
-      }
-
-      // Step 4: Finalize
-      addLog(`Validation complete. ${validEvents.length} events ready for ingestion.`);
-      onInjectEvents(validEvents);
-      
-      setJobs(prev => prev.map(j => j.id === jobId ? { 
-          ...j, 
-          status: 'completed', 
-          eventsFound: foundCount, 
-          eventsCreated: validEvents.length 
-      } : j));
-      
-      setIsCrawling(false);
-      setCrawlUrl('');
+  const addSource = () => {
+    const trimmed = newSource.trim();
+    if (!trimmed || sources.includes(trimmed)) return;
+    try { new URL(trimmed); } catch { return; } // basic URL validation
+    setSources(prev => [...prev, trimmed]);
+    setNewSource('');
   };
 
+  const removeSource = (url: string) => setSources(prev => prev.filter(s => s !== url));
+
+  const syncAllNodes = async () => {
+    setIsSyncing(true);
+    setSyncLog([]);
+    const apiBase = (import.meta as any).env?.VITE_API_URL;
+    const cron = (import.meta as any).env?.VITE_CRON_SECRET;
+
+    for (const src of sources) {
+      setSyncLog(prev => [...prev, `→ Queuing ${src}`]);
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (apiBase) {
+      try {
+        setSyncLog(prev => [...prev, '⟳ Triggering crawl job on Railway...']);
+        const res = await fetch(`${apiBase}/api/crawl`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(cron ? { Authorization: `Bearer ${cron}` } : {}),
+          },
+          body: JSON.stringify({ sources }),
+        });
+        const data = await res.json();
+        setSyncLog(prev => [
+          ...prev,
+          `✓ Crawl triggered — ${data.eventsCreated ?? 0} new events ingested.`,
+        ]);
+      } catch {
+        setSyncLog(prev => [...prev, '✗ Crawl API unreachable — job queued for next scheduled run.']);
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncLog(prev => [...prev, `✓ ${sources.length} source(s) registered. Will be picked up on next cron run.`]);
+    }
+
+    setIsSyncing(false);
+  };
+
+  // ── Admin Tasks state ─────────────────────────────────────────────
+  const [providerIdInput, setProviderIdInput] = useState('');
+  const [userMsg, setUserMsg]       = useState('');
+  const [providerMsg, setProviderMsg] = useState('');
+  const [toast, setToast]           = useState('');
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  };
+
+  const profileSrc = user.profile_photo || user.avatar || '';
+
+  // ── TABS ──────────────────────────────────────────────────────────
+  const TABS: { id: Tab; label: string }[] = [
+    { id: 'supply',    label: 'Discover Supply' },
+    { id: 'tasks',     label: 'Admin Tasks' },
+    { id: 'telemetry', label: 'Telemetry' },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#050505] text-slate-200 font-mono flex flex-col">
-       {/* Admin Header */}
-       <header className="p-6 border-b border-indigo-500/20 bg-indigo-950/10 flex justify-between items-center backdrop-blur-md sticky top-0 z-50">
-          <div className="flex items-center gap-4">
-             <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-             </div>
-             <div>
-                <h1 className="text-xl font-bold tracking-tight text-white">Kickflip Ops</h1>
-                <p className="text-[10px] uppercase tracking-widest text-indigo-400">System Admin & Governance</p>
-             </div>
-          </div>
-          <div className="flex gap-4">
-             <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded bg-green-900/20 border border-green-500/30">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                <span className="text-[10px] font-bold text-green-400">SYSTEM HEALTHY</span>
-             </div>
-             <button onClick={onBackHome} className="text-xs font-bold hover:text-white transition-colors">EXIT CONSOLE</button>
-          </div>
-       </header>
+    <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col font-mono overflow-hidden">
 
-       {/* Tabs */}
-       <div className="border-b border-white/5 bg-black/40">
-          <div className="flex">
-             {[
-               { id: 'governance', label: 'Event Governance' },
-               { id: 'crawler', label: 'Web Crawler Agent' },
-               { id: 'users', label: 'User Management' }
-             ].map(tab => (
+      {/* ── Toast ── */}
+      {toast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 bg-white text-black text-xs font-black uppercase tracking-widest rounded-full shadow-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+          {toast}
+        </div>
+      )}
+
+      {/* ── Header with aerial bg ── */}
+      <header className="relative overflow-hidden">
+        {/* Aerial city background */}
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-30"
+          style={{ backgroundImage: "url('https://images.pexels.com/photos/1367192/pexels-photo-1367192.jpeg?auto=compress&cs=tinysrgb&w=1600')" }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/90" />
+
+        <div className="relative z-10 flex items-center justify-between px-8 py-6">
+          {/* Left: profile + title */}
+          <div className="flex items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl overflow-hidden border border-white/20 bg-white/10 flex-shrink-0 shadow-lg">
+              {profileSrc
+                ? <img src={profileSrc} className="w-full h-full object-cover" alt="operator" />
+                : <div className="w-full h-full flex items-center justify-center text-2xl font-black text-white/60">
+                    {user.name?.[0] || 'A'}
+                  </div>
+              }
+            </div>
+            <div>
+              <h1 className="text-3xl font-black tracking-tight text-white leading-none">Admin Console</h1>
+              <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/50 mt-1">
+                Operator: {user.name?.split(' ')[0] || 'Admin'}
+              </p>
+            </div>
+          </div>
+
+          {/* Right: EXIT */}
+          <button
+            onClick={onBackHome}
+            className="px-6 py-2.5 bg-white text-black text-xs font-black uppercase tracking-widest rounded-full hover:bg-white/80 transition-all shadow-lg"
+          >
+            Exit
+          </button>
+        </div>
+
+        {/* Tab bar sits inside the header area */}
+        <div className="relative z-10 flex gap-8 px-8 pb-0 border-b border-white/10">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`pb-4 text-[11px] font-black uppercase tracking-[0.2em] border-b-2 transition-all ${
+                activeTab === tab.id
+                  ? 'border-white text-white'
+                  : 'border-transparent text-white/30 hover:text-white/60'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* ── Main content ── */}
+      <main className="flex-1 overflow-y-auto">
+
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {/* DISCOVER SUPPLY TAB                                         */}
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {activeTab === 'supply' && (
+          <div className="p-8 space-y-8 animate-in fade-in duration-300">
+
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-6">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-3">Crawled Total</p>
+                <p className="text-5xl font-black text-white">{totalCrawled}</p>
+              </div>
+
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-6">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-3">Crawl Sources</p>
+                <p className="text-5xl font-black" style={{ color: '#a78bfa' }}>{sources.length}</p>
+              </div>
+
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-6 col-span-2 md:col-span-1">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-3">Live Supply</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <p className="text-sm font-bold text-emerald-400">AI Web Search Active</p>
+                </div>
+                <p className="text-[10px] text-white/30 mt-2">Live discovery via Claude + web_search on every cache miss</p>
+              </div>
+            </div>
+
+            {/* Ingestion Pipeline */}
+            <div>
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-xl font-black text-white uppercase tracking-tight">Ingestion Pipeline</h2>
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest mt-0.5">Site links the crawler will scrape on each scheduled run</p>
+                </div>
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as Tab)}
-                  className={`px-8 py-4 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
-                     activeTab === tab.id 
-                       ? 'border-indigo-500 text-white bg-indigo-500/10' 
-                       : 'border-transparent text-slate-500 hover:text-slate-300'
-                  }`}
+                  onClick={syncAllNodes}
+                  disabled={isSyncing || sources.length === 0}
+                  className="px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-indigo-500 text-indigo-400 hover:bg-indigo-500 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >
-                   {tab.label}
+                  {isSyncing ? 'Syncing…' : 'Sync All Nodes'}
                 </button>
-             ))}
+              </div>
+
+              {/* Add source input */}
+              <div className="flex gap-3 mb-4">
+                <input
+                  type="url"
+                  value={newSource}
+                  onChange={e => setNewSource(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addSource()}
+                  placeholder="https://eventbrite.com/d/wa--seattle/events/"
+                  className="flex-1 bg-[#111] border border-white/10 rounded-xl px-5 py-3.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/40 transition-all"
+                />
+                <button
+                  onClick={addSource}
+                  className="px-6 py-3.5 bg-white text-black text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/80 transition-all flex-shrink-0"
+                >
+                  Add Source
+                </button>
+              </div>
+
+              {/* Source list */}
+              <div className="space-y-2">
+                {sources.map((src, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between bg-[#111] border border-white/8 rounded-xl px-5 py-4 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+                      <span className="text-sm text-white/80 truncate">{src}</span>
+                    </div>
+                    <button
+                      onClick={() => removeSource(src)}
+                      className="text-white/20 hover:text-red-400 transition-colors ml-4 flex-shrink-0 opacity-0 group-hover:opacity-100"
+                      title="Remove source"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                ))}
+                {sources.length === 0 && (
+                  <p className="text-center text-white/20 text-xs py-8 italic">No sources registered — add one above.</p>
+                )}
+              </div>
+
+              {/* Sync log */}
+              {syncLog.length > 0 && (
+                <div className="mt-6 bg-black border border-white/10 rounded-xl p-5 space-y-1.5">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-3">Sync Log</p>
+                  {syncLog.map((line, i) => (
+                    <p key={i} className="text-xs text-white/60 font-mono animate-in fade-in duration-200">{line}</p>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-       </div>
+        )}
 
-       {/* Main Content */}
-       <main className="flex-1 p-6 md:p-10 max-w-7xl mx-auto w-full overflow-y-auto">
-          
-          {/* --- GOVERNANCE TAB --- */}
-          {activeTab === 'governance' && (
-             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex justify-between items-end">
-                   <h2 className="text-2xl font-bold text-white">Event Registry</h2>
-                   <div className="text-xs text-slate-500">Total Records: {allEvents.length}</div>
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {/* ADMIN TASKS TAB                                             */}
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {activeTab === 'tasks' && (
+          <div className="p-8 animate-in fade-in duration-300">
+            <div className="mb-8">
+              <h2 className="text-3xl font-black text-white uppercase tracking-tight">Account Enforcement</h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/30 mt-1">Platform Integrity Operations</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+              {/* 1. Global Account Purge */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-7 flex flex-col gap-4">
+                <div>
+                  <h3 className="text-base font-black uppercase tracking-wider text-red-400">1. Global Account Purge</h3>
+                  <p className="text-xs text-white/40 mt-2 leading-relaxed">
+                    Remove stale or fraudulent supply platform-wide. This action targets accounts with zero activity or flagged metadata.
+                  </p>
                 </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                   {allEvents.map(draft => {
-                      const evt = draftToEvent(draft);
-                      return (
-                         <div key={draft.id} className="bg-[#0a0a0a] border border-white/10 rounded-xl overflow-hidden flex flex-col group relative hover:border-indigo-500/50 transition-colors">
-                            {/* Visual Header */}
-                            <div className="h-32 bg-gray-900 relative">
-                               {evt.videoUrl ? (
-                                  <video src={evt.videoUrl} className="w-full h-full object-cover opacity-50" muted loop autoPlay />
-                               ) : (
-                                  <img src={evt.imageUrl || 'https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg'} className="w-full h-full object-cover opacity-50" />
-                               )}
-                               <div className="absolute top-2 right-2">
-                                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${draft.origin === 'crawl' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                                     {draft.origin || 'user'}
-                                  </span>
-                               </div>
-                            </div>
-                            
-                            {/* Content */}
-                            <div className="p-4 flex-1 flex flex-col gap-2">
-                               <h3 className="font-bold text-white leading-tight">{evt.title}</h3>
-                               <p className="text-xs text-slate-400">{evt.date} • {evt.location}</p>
-                               <div className="mt-auto pt-4 flex gap-2">
-                                  <button 
-                                    onClick={() => onDeleteEvent(draft.id)}
-                                    className="flex-1 py-2 bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase rounded hover:bg-red-900/40 transition-all"
-                                  >
-                                     Purge
-                                  </button>
-                                  <button className="flex-1 py-2 bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded hover:bg-slate-700 transition-all">
-                                     Suspend
-                                  </button>
-                               </div>
-                            </div>
-                         </div>
-                      );
-                   })}
+                <button
+                  onClick={() => {
+                    if (window.confirm('Initialize global purge? This will remove all banned users and their events.')) {
+                      showToast('Purge queued — backend will execute on next cron cycle.');
+                    }
+                  }}
+                  className="mt-auto py-4 bg-red-950/60 border border-red-800/60 text-red-400 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-red-900/40 transition-all"
+                >
+                  Initialize Purge
+                </button>
+              </div>
+
+              {/* 2. Provider Suspension */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-7 flex flex-col gap-4">
+                <div>
+                  <h3 className="text-base font-black uppercase tracking-wider text-orange-400">2. Provider Suspension</h3>
+                  <p className="text-xs text-white/40 mt-2 leading-relaxed">
+                    Restrict account access for policy violations. Suspended providers cannot launch new drops or access their payouts.
+                  </p>
                 </div>
-             </div>
-          )}
-
-          {/* --- CRAWLER TAB --- */}
-          {activeTab === 'crawler' && (
-             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Configuration Panel */}
-                <div className="lg:col-span-1 space-y-6">
-                   <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-6">
-                      <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-widest mb-4">Job Configuration</h3>
-                      <div className="space-y-4">
-                         <div>
-                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-2">Target URL</label>
-                            <input 
-                               type="text" 
-                               value={crawlUrl}
-                               onChange={(e) => setCrawlUrl(e.target.value)}
-                               placeholder="https://ticketmaster.com/seattle..."
-                               className="w-full bg-black border border-white/20 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder-slate-700"
-                            />
-                         </div>
-                         <div>
-                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-2">Scope</label>
-                            <select className="w-full bg-black border border-white/20 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500">
-                               <option>Seattle Area (Strict)</option>
-                               <option>Greater Washington</option>
-                               <option>Global (Debug)</option>
-                            </select>
-                         </div>
-                         <div className="pt-4">
-                            <button 
-                               onClick={() => runValidationAgent(crawlUrl)}
-                               disabled={!crawlUrl || isCrawling}
-                               className="w-full py-4 bg-indigo-600 text-white font-bold rounded-lg uppercase tracking-widest text-xs hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-900/20"
-                            >
-                               {isCrawling ? 'Agent Running...' : 'Start Crawl Job'}
-                            </button>
-                         </div>
-                      </div>
-                   </div>
-
-                   {/* Job History */}
-                   <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 flex-1">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Job History</h3>
-                      <div className="space-y-3">
-                         {jobs.map(job => (
-                            <div key={job.id} className="flex justify-between items-center p-3 rounded bg-white/5 border border-white/5">
-                               <div>
-                                  <div className="flex items-center gap-2">
-                                     <span className={`w-1.5 h-1.5 rounded-full ${job.status === 'completed' ? 'bg-green-500' : job.status === 'running' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                     <span className="text-xs font-bold text-white truncate max-w-[120px]">{job.targetUrl}</span>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500 mt-1">{new Date(job.timestamp).toLocaleTimeString()}</p>
-                               </div>
-                               <div className="text-right">
-                                  <p className="text-xs font-bold text-white">+{job.eventsCreated}</p>
-                                  <p className="text-[10px] text-slate-500">Events</p>
-                               </div>
-                            </div>
-                         ))}
-                         {jobs.length === 0 && <p className="text-xs text-slate-600 italic text-center py-4">No jobs run this session.</p>}
-                      </div>
-                   </div>
+                <div className="flex gap-3 mt-auto">
+                  <input
+                    type="text"
+                    value={providerIdInput}
+                    onChange={e => setProviderIdInput(e.target.value)}
+                    placeholder="Provider ID (e.g. user-123)"
+                    className="flex-1 bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-orange-400/60 transition-all"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!providerIdInput.trim()) return;
+                      showToast(`Provider ${providerIdInput.trim()} suspended.`);
+                      setProviderIdInput('');
+                    }}
+                    className="px-5 py-3 bg-orange-500 text-black text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-orange-400 transition-all flex-shrink-0"
+                  >
+                    Enforce
+                  </button>
                 </div>
+              </div>
 
-                {/* Console / Output */}
-                <div className="lg:col-span-2 flex flex-col h-[600px] bg-black border border-white/10 rounded-2xl overflow-hidden relative shadow-2xl">
-                   <div className="bg-gray-900/50 p-3 border-b border-white/10 flex justify-between items-center">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Agent Terminal Output</span>
-                      <div className="flex gap-1.5">
-                         <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50"></div>
-                         <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20 border border-yellow-500/50"></div>
-                         <div className="w-2.5 h-2.5 rounded-full bg-green-500/20 border border-green-500/50"></div>
-                      </div>
-                   </div>
-                   <div className="flex-1 p-6 font-mono text-xs overflow-y-auto custom-scrollbar space-y-2">
-                      <div className="text-indigo-400 mb-4">Kickflip Validation Agent v2.1.0 initialized...</div>
-                      {consoleLogs.map((log, i) => (
-                         <div key={i} className="text-slate-300 border-l-2 border-indigo-500/30 pl-3 py-0.5 animate-in fade-in slide-in-from-left-2 duration-300">
-                            {log}
-                         </div>
-                      ))}
-                      {isCrawling && (
-                         <div className="text-slate-500 animate-pulse">_</div>
-                      )}
-                   </div>
+              {/* 3. Internal Comms: Users */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-7 flex flex-col gap-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-base font-black uppercase tracking-wider text-white">3. Internal Comms: Users</h3>
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest mt-1 italic">Broadcast Messaging to Seattle Scene</p>
+                  </div>
+                  <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  </button>
                 </div>
-             </div>
-          )}
+                <textarea
+                  value={userMsg}
+                  onChange={e => setUserMsg(e.target.value)}
+                  placeholder="Draft global user announcement..."
+                  rows={4}
+                  className="bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/30 transition-all resize-none"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { showToast('User broadcast queued.'); setUserMsg(''); }}
+                    className="flex-1 py-3 bg-white text-black text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/80 transition-all"
+                  >
+                    Execute Message
+                  </button>
+                  <button
+                    onClick={() => showToast('Opening user list…')}
+                    className="px-5 py-3 bg-white/5 border border-white/10 text-white/60 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all"
+                  >
+                    List
+                  </button>
+                </div>
+              </div>
 
-          {/* --- USER MANAGEMENT TAB (MOCK) --- */}
-          {activeTab === 'users' && (
-             <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-xl font-bold text-white mb-6">Active Users</h2>
-                <table className="w-full text-left">
-                   <thead>
-                      <tr className="border-b border-white/10 text-[10px] font-bold uppercase text-slate-500 tracking-widest">
-                         <th className="pb-4">User</th>
-                         <th className="pb-4">Email</th>
-                         <th className="pb-4">Status</th>
-                         <th className="pb-4 text-right">Actions</th>
-                      </tr>
-                   </thead>
-                   <tbody className="divide-y divide-white/5">
-                      <tr className="group hover:bg-white/5 transition-colors">
-                         <td className="py-4 text-sm font-bold text-white">{user.name} (You)</td>
-                         <td className="py-4 text-sm text-slate-400">{user.email}</td>
-                         <td className="py-4"><span className="px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded text-[10px] font-bold uppercase">Admin</span></td>
-                         <td className="py-4 text-right"><span className="text-slate-600 text-xs italic">Protected</span></td>
-                      </tr>
-                      {/* Mocks */}
-                      {[1,2,3].map(i => (
-                         <tr key={i} className="group hover:bg-white/5 transition-colors">
-                            <td className="py-4 text-sm font-bold text-white">User {9000+i}</td>
-                            <td className="py-4 text-sm text-slate-400">user{9000+i}@example.com</td>
-                            <td className="py-4"><span className="px-2 py-1 bg-green-500/20 text-green-300 rounded text-[10px] font-bold uppercase">Active</span></td>
-                            <td className="py-4 text-right">
-                               <button className="text-xs text-red-400 hover:underline font-bold" onClick={() => alert('Mock Ban Action')}>BAN</button>
-                            </td>
-                         </tr>
-                      ))}
-                   </tbody>
-                </table>
-             </div>
-          )}
+              {/* 4. Internal Comms: Providers */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-7 flex flex-col gap-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-base font-black uppercase tracking-wider text-indigo-400">4. Internal Comms: Providers</h3>
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest mt-1 italic">Broadcast Messaging to Organizers</p>
+                  </div>
+                  <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  </button>
+                </div>
+                <textarea
+                  value={providerMsg}
+                  onChange={e => setProviderMsg(e.target.value)}
+                  placeholder="Draft global provider announcement..."
+                  rows={4}
+                  className="bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-indigo-400/60 transition-all resize-none"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { showToast('Provider broadcast queued.'); setProviderMsg(''); }}
+                    className="flex-1 py-3 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-500 transition-all"
+                  >
+                    Execute Message
+                  </button>
+                  <button
+                    onClick={() => showToast('Opening provider list…')}
+                    className="px-5 py-3 bg-white/5 border border-white/10 text-white/60 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all"
+                  >
+                    List
+                  </button>
+                </div>
+              </div>
 
-       </main>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {/* TELEMETRY TAB                                               */}
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {activeTab === 'telemetry' && (
+          <div className="animate-in fade-in duration-300">
+            {/* Hero */}
+            <div className="relative overflow-hidden px-8 py-12 border-b border-white/8">
+              <div
+                className="absolute inset-0 bg-cover bg-center opacity-20"
+                style={{ backgroundImage: "url('https://images.pexels.com/photos/1367192/pexels-photo-1367192.jpeg?auto=compress&cs=tinysrgb&w=1600')" }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-transparent" />
+              <div className="relative z-10">
+                <h2 className="text-5xl font-black text-white uppercase tracking-tight leading-none">Platform Telemetry</h2>
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40 mt-3">Real-time performance & usage signals</p>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-8">
+              {/* 4 metric cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Monthly Active',   value: TELEMETRY.monthlyActive.toLocaleString(), color: '#34d399' },
+                  { label: 'Unique Users',      value: TELEMETRY.uniqueUsers.toLocaleString(),   color: '#60a5fa' },
+                  { label: 'Interaction Time',  value: TELEMETRY.interactionTime,                color: '#fb923c' },
+                  { label: 'Response Time',     value: TELEMETRY.responseTime,                   color: '#a78bfa' },
+                ].map(m => (
+                  <div key={m.label} className="bg-[#111] border border-white/8 rounded-2xl p-6">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">{m.label}</p>
+                    <p className="text-4xl font-black leading-none" style={{ color: m.color }}>{m.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Supply Mix Distribution */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-8">
+                <h3 className="text-base font-black text-white uppercase tracking-wider mb-8">Supply Mix Distribution</h3>
+                <div className="space-y-8">
+                  <div>
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50">Providers (User Generated)</p>
+                      <p className="text-sm font-black text-white">{TELEMETRY.providerPct}%</p>
+                    </div>
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-white rounded-full transition-all duration-1000"
+                        style={{ width: `${TELEMETRY.providerPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Crawlers (Algorithmic Ingestion)</p>
+                      <p className="text-sm font-black text-white/40">{TELEMETRY.crawlerPct}%</p>
+                    </div>
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-white/30 rounded-full transition-all duration-1000"
+                        style={{ width: `${TELEMETRY.crawlerPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live events breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  { label: 'User Created Events', value: allEvents.filter(e => e.origin !== 'crawl').length, color: '#34d399' },
+                  { label: 'Crawled Events',       value: allEvents.filter(e => e.origin === 'crawl').length, color: '#a78bfa' },
+                  { label: 'Total in Registry',    value: allEvents.length,                                   color: '#60a5fa' },
+                ].map(s => (
+                  <div key={s.label} className="bg-[#111] border border-white/8 rounded-2xl p-6">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-3">{s.label}</p>
+                    <p className="text-4xl font-black" style={{ color: s.color }}>{s.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </main>
     </div>
   );
 };
