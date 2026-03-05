@@ -234,8 +234,11 @@ async function upsertEvents(events, vectors, windowEnd) {
       category: event.category || 'other',
       payload: event,
       embedding,
+      origin: 'crawl',
+      status: 'active',
       crawled_at: new Date().toISOString(),
       source_url: event.link || null,
+      crawl_source: event.crawlSource || null,
       expires_at: expiresAt.toISOString(),
       updated_at: new Date().toISOString(),
     };

@@ -219,11 +219,15 @@ export const syncEventToRemote = async (event: EventDraft): Promise<{ success: b
 
         const { error } = await supabase
             .from('kickflip_events')
-            .upsert({ 
-                id: recordId, 
-                title: event.title, 
+            .upsert({
+                id: recordId,
+                title: event.title,
                 category: event.category,
                 payload: payload,
+                origin: 'user',
+                status: event.status || 'active',
+                creator_id: event.creatorId || null,
+                source_url: null,              // native events have no external URL
                 updated_at: new Date().toISOString()
             }, { onConflict: 'id' });
 

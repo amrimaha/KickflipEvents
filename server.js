@@ -327,8 +327,11 @@ async function storeDiscoveredEvents(events) {
         category: event.category || 'other',
         payload: event,
         embedding,
+        origin: 'crawl',
+        status: 'active',
         crawled_at: new Date().toISOString(),
         source_url: event.link || null,
+        crawl_source: event.crawlSource || null,
         expires_at: expiresAt,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
