@@ -34,7 +34,8 @@ const supabase     = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-app.use(cors());
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'DELETE', 'PATCH', 'OPTIONS'] }));
+app.options('*', cors()); // respond to CORS preflight for all routes
 app.use(express.json({ limit: '2mb' }));
 
 // ─── Analytics helpers ───────────────────────────────────────────────

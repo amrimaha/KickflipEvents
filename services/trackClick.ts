@@ -1,8 +1,9 @@
 /**
  * Clickstream tracking — fire-and-forget POST to /api/events/click.
  *
- * Never throws or awaits in a way that blocks the UI.
- * Silently no-ops if VITE_API_URL is not set (local dev without backend).
+ * Uses fetch with keepalive:true so the request survives page navigation.
+ * Errors are logged as warnings in dev; silently dropped in production.
+ * Never throws or blocks the UI.
  */
 
 import { getAnonId } from '../utils/anonId';
@@ -28,7 +29,9 @@ export interface ClickPayload {
 
 export function trackClick(payload: ClickPayload): void {
   const apiBase = (import.meta as any).env?.VITE_API_URL;
-  if (!apiBase) return; // no-op in local dev without backend
+  if (!apiBase) return; // no-op when backend URL is not configured
+
+  const isDev = (import.meta as any).env?.DEV === true;
 
   const body = JSON.stringify({
     ...payload,
@@ -36,19 +39,20 @@ export function trackClick(payload: ClickPayload): void {
     user_id: payload.user_id ?? null,
   });
 
-  // Use sendBeacon when available (guaranteed delivery even on page unload).
-  // Fall back to fetch (fire-and-forget).
-  if (navigator.sendBeacon) {
-    const blob = new Blob([body], { type: 'application/json' });
-    navigator.sendBeacon(`${apiBase}/api/events/click`, blob);
-  } else {
-    fetch(`${apiBase}/api/events/click`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(() => {
-      // silently ignore — click tracking must never affect product UX
-    });
-  }
+  // keepalive:true ensures the request completes even if the user navigates away.
+  // We do NOT use sendBeacon because sendBeacon with application/json triggers a
+  // CORS preflight that it cannot wait for, causing silent drops in browsers.
+  fetch(`${apiBase}/api/events/click`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+  }).then(res => {
+    if (isDev && !res.ok) {
+      console.warn(`[trackClick] ${payload.action} → HTTP ${res.status} for event ${payload.event_id}`);
+    }
+  }).catch(err => {
+    // Network error — analytics must never affect the product UX
+    if (isDev) console.warn('[trackClick] network error:', err);
+  });
 }
