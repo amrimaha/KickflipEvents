@@ -191,15 +191,107 @@ async function saveCache(queryHash, queryText, eventIds, resultText) {
   }, { onConflict: 'query_hash' });
 }
 
-/** pgvector similarity search via Supabase RPC */
-async function searchByEmbedding(queryVector, threshold = 0.72, limit = 10) {
+/** pgvector similarity search via Supabase RPC — supports optional date + is_free constraints */
+async function searchByEmbedding(queryVector, threshold = 0.72, limit = 10, constraints = {}) {
+  const { dateFrom, dateTo, isFree } = constraints;
   const { data, error } = await supabase.rpc('search_events_by_embedding', {
     query_embedding: queryVector,
     match_threshold: threshold,
     match_count: limit,
+    date_from: dateFrom || null,
+    date_to: dateTo || null,
+    filter_is_free: isFree !== undefined ? isFree : null,
   });
   if (error) throw new Error(`pgvector search error: ${error.message}`);
   return (data || []).map(row => ({ similarity: row.similarity, ...(row.payload || {}), id: row.id }));
+}
+
+/**
+ * Chronological fallback — returns future events ordered by start date.
+ * Used when embedding search returns zero results or embedding API is down.
+ */
+async function searchChronological(constraints = {}, limit = 10) {
+  const { dateFrom, dateTo, isFree } = constraints;
+  const { data, error } = await supabase.rpc('search_events_chronological', {
+    result_limit: limit,
+    date_from: dateFrom || null,
+    date_to: dateTo || null,
+    filter_is_free: isFree !== undefined ? isFree : null,
+  });
+  if (error) throw new Error(`chronological search error: ${error.message}`);
+  return (data || []).map(row => ({ ...(row.payload || {}), id: row.id }));
+}
+
+/**
+ * Parse user query for date constraints and free-event intent.
+ * Ported from Ravi's app/query/parser.py.
+ *
+ * Returns:
+ *   intent    — query with date/free phrases stripped (used for embedding)
+ *   dateFrom  — ISO string or null
+ *   dateTo    — ISO string or null
+ *   isFree    — true | undefined (never false — don't exclude paid events)
+ *   dateLabel — human label for logging ('today', 'weekend', etc.)
+ */
+function parseQueryConstraints(query) {
+  const now = new Date();
+  const seattleNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const today = new Date(seattleNow); today.setHours(0, 0, 0, 0);
+
+  function addDays(d, n) {
+    const r = new Date(d); r.setDate(r.getDate() + n); return r;
+  }
+  function isoDate(d) {
+    return d.toISOString().split('T')[0] + 'T00:00:00.000Z';
+  }
+  function isoEndDate(d) {
+    return d.toISOString().split('T')[0] + 'T23:59:59.999Z';
+  }
+
+  let dateFrom = null, dateTo = null, dateLabel = null;
+  let q = query.toLowerCase();
+
+  // ── Date patterns ────────────────────────────────────────────────────
+  const dayOfWeek = seattleNow.getDay(); // 0=Sun, 6=Sat
+
+  if (/\btoday\b/.test(q)) {
+    dateFrom = isoDate(today); dateTo = isoEndDate(today); dateLabel = 'today';
+    q = q.replace(/\btoday\b/g, '');
+  } else if (/\btomorrow\b/.test(q)) {
+    const tom = addDays(today, 1);
+    dateFrom = isoDate(tom); dateTo = isoEndDate(tom); dateLabel = 'tomorrow';
+    q = q.replace(/\btomorrow\b/g, '');
+  } else if (/\bthis\s+weekend\b/.test(q)) {
+    const daysToSat = (6 - dayOfWeek + 7) % 7 || 7;
+    const sat = addDays(today, daysToSat);
+    const sun = addDays(sat, 1);
+    dateFrom = isoDate(sat); dateTo = isoEndDate(sun); dateLabel = 'weekend';
+    q = q.replace(/\bthis\s+weekend\b/g, '');
+  } else if (/\bthis\s+week\b/.test(q)) {
+    dateFrom = isoDate(today); dateTo = isoEndDate(addDays(today, 7)); dateLabel = 'this_week';
+    q = q.replace(/\bthis\s+week\b/g, '');
+  } else if (/\bnext\s+week\b/.test(q)) {
+    const daysToMon = (1 - dayOfWeek + 7) % 7 || 7;
+    const mon = addDays(today, daysToMon);
+    const sun = addDays(mon, 6);
+    dateFrom = isoDate(mon); dateTo = isoEndDate(sun); dateLabel = 'next_week';
+    q = q.replace(/\bnext\s+week\b/g, '');
+  } else if (/\bthis\s+month\b/.test(q)) {
+    const lastDay = new Date(seattleNow.getFullYear(), seattleNow.getMonth() + 1, 0);
+    dateFrom = isoDate(today); dateTo = isoEndDate(lastDay); dateLabel = 'this_month';
+    q = q.replace(/\bthis\s+month\b/g, '');
+  }
+
+  // ── Free event detection ──────────────────────────────────────────────
+  let isFree;
+  if (/\bfree\b|\bno\s+cost\b|\bfree\s+events?\b|\bfree\s+admission\b/.test(q)) {
+    isFree = true;
+    q = q.replace(/\bfree\s+events?\b|\bfree\s+admission\b|\bno\s+cost\b|\bfree\b/g, '');
+  }
+
+  const intent = q.replace(/\s+/g, ' ').trim() || query;
+
+  return { intent, dateFrom, dateTo, isFree, dateLabel };
 }
 
 // ─── Claude formatting (orchestrator role only) ───────────────────────
@@ -368,31 +460,60 @@ app.post('/api/chat', async (req, res) => {
 
     console.log(`[cache MISS] "${query}" — running embedding search`);
 
-    // ── ② Embed the query ────────────────────────────────────────────
-    const queryVector = await embedQuery(query);
+    // ── ② Parse query constraints (date range, is_free, intent) ──────
+    const constraints = parseQueryConstraints(query);
+    const { intent, dateFrom, dateTo, isFree, dateLabel } = constraints;
+    if (dateLabel || isFree) {
+      console.log(`[parse] intent="${intent}" dateLabel=${dateLabel || 'none'} isFree=${isFree ?? 'any'}`);
+    }
 
-    // ── ③ pgvector similarity search ─────────────────────────────────
-    const matchedEvents = await searchByEmbedding(queryVector, 0.72, 10);
+    // ── ③ Embed the intent (date/free phrases stripped) ───────────────
+    let queryVector;
+    try {
+      queryVector = await embedQuery(intent);
+    } catch (embedErr) {
+      console.warn(`[embed] failed: ${embedErr.message} — falling back to chronological`);
+      const fallbackEvents = await searchChronological(constraints, 10);
+      const result = fallbackEvents.length >= 1
+        ? await formatWithClaude(query, fallbackEvents, currentDateTime)
+        : await discoverWithWebSearch(query, currentDateTime);
+      const rawEvents = (result.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
+      await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
+      res.json({ text: result.text || 'Checking the local scene...', events: rawEvents });
+      trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'chronological' });
+      return;
+    }
+
+    // ── ④ pgvector similarity search with constraints ─────────────────
+    let matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, constraints);
     console.log(`[pgvector] found ${matchedEvents.length} events above threshold`);
+
+    // ── ④a is_free retry: if 0 results with isFree filter → retry without ──
+    let usedFreeRetry = false;
+    if (matchedEvents.length === 0 && isFree !== undefined) {
+      console.log(`[pgvector] 0 results with is_free filter — retrying without it`);
+      matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, { dateFrom, dateTo });
+      usedFreeRetry = true;
+    }
 
     let result;
 
     if (matchedEvents.length >= 3) {
-      // ── ④a Good match — Claude formats only the top-10 ─────────────
+      // ── ④b Good match — Claude formats top results ──────────────────
       console.log(`[claude] formatting ${matchedEvents.length} pre-filtered events`);
       result = await formatWithClaude(query, matchedEvents, currentDateTime);
 
     } else {
-      // ── ④b Low confidence — try lower threshold first ───────────────
+      // ── ④c Low confidence — try lower threshold ─────────────────────
       const broadMatches = matchedEvents.length > 0
         ? matchedEvents
-        : await searchByEmbedding(queryVector, 0.5, 6);
+        : await searchByEmbedding(queryVector, 0.5, 6, { dateFrom, dateTo });
 
       if (broadMatches.length >= 2) {
         console.log(`[claude] broad match — formatting ${broadMatches.length} events`);
         result = await formatWithClaude(query, broadMatches, currentDateTime);
       } else {
-        // ── ④c Live web search fallback ──────────────────────────────
+        // ── ④d Live web search fallback ───────────────────────────────
         console.log(`[web_search] no DB match — triggering live search`);
         result = await discoverWithWebSearch(query, currentDateTime);
 
@@ -413,7 +534,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Determine source label for analytics
     const responseSource = matchedEvents?.length >= 3 ? 'claude'
-      : (matchedEvents?.length >= 2 ? 'embedding' : 'websearch');
+      : (usedFreeRetry ? 'semantic_nofree' : matchedEvents?.length >= 2 ? 'embedding' : 'websearch');
 
     // ── Save to cache ─────────────────────────────────────────────────
     await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');

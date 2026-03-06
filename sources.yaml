@@ -1,0 +1,538 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kickflip Event Sources  —  single source of truth for all crawl targets
+#
+# Fields:
+#   name               display name (used as source_name in DB + logs)
+#   base_url           root of the site (used for same-domain checks)
+#   listing_urls       one or more pages to start URL discovery from
+#                      omit to use base_url
+#   crawl_strategy     auto | static | dynamic   (default: auto)
+#   allow_patterns     regex list — event page URLs MUST match at least one
+#   deny_patterns      regex list — matching URLs are always skipped
+#   max_pages_per_run  cap on event pages crawled per run   (default: 50)
+#   seattle_scoped     true → default city=Seattle state=WA when missing
+#   respect_robots     true|false → override global RESPECT_ROBOTS_TXT for
+#                      this source only. Omit to use the global setting.
+#                      Set false only when you have explicit permission or the
+#                      site incorrectly disallows legitimate crawlers.
+#   crawl_delay_seconds  float → static delay (seconds) between every page
+#                        fetch for this source. Use when respect_robots=false
+#                        to honour the site's stated Crawl-delay without
+#                        reading robots.txt. Ignored when robots check is active
+#                        (robots.txt Crawl-delay takes precedence).
+#   enabled            false → skip entirely without removing the entry
+#   notes              operator notes
+# ─────────────────────────────────────────────────────────────────────────────
+
+sources:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MVP  (enabled: true)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  - name: Visit Seattle
+    base_url: https://visitseattle.org
+    listing_urls:
+      - https://visitseattle.org/things-to-do/events/
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/things-to-do/events/[^/?]+'
+    deny_patterns:
+      - 'page='
+      - 'category='
+      - 'tag='
+      - 'filter='
+    max_pages_per_run: 60
+    seattle_scoped: true
+    enabled: true
+    notes: "Official Seattle tourism event calendar. JS-rendered listing — requires Playwright."
+
+  - name: Everout Seattle
+    base_url: https://everout.com
+    listing_urls:
+      - https://everout.com/seattle/events/
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/seattle/events/[^/]+/[^/]+'
+    deny_patterns:
+      - '/articles/'
+      - '/guide/'
+      - '/where-to/'
+    max_pages_per_run: 60
+    seattle_scoped: true
+    enabled: true
+    notes: "Curated Seattle events. SPA — Playwright required. Good JSON-LD."
+
+  - name: Seattle Center
+    base_url: https://www.seattlecenter.com
+    listing_urls:
+      - https://www.seattlecenter.com/events/
+    crawl_strategy: auto
+    allow_patterns:
+      - '/events/detail/'
+      - '/events/[a-z0-9-]+-\d{4}'
+    deny_patterns:
+      - '/events/category/'
+      - '/events/venue/'
+      - '/events/$'
+    max_pages_per_run: 40
+    seattle_scoped: true
+    enabled: true
+    notes: "Campus events at Seattle Center."
+
+  - name: Town Hall Seattle
+    base_url: https://www.townhallseattle.org
+    listing_urls:
+      - https://www.townhallseattle.org/events/
+    crawl_strategy: auto
+    allow_patterns:
+      - '/event/'
+    deny_patterns:
+      - '/events/$'
+      - '/series/'
+      - '/program/$'
+    max_pages_per_run: 40
+    seattle_scoped: true
+    respect_robots: false      # WAF returns 403 fetching /robots.txt; actual content is Disallow: (allow-all)
+    crawl_delay_seconds: 10    # honour the Crawl-delay: 10 stated in their robots.txt
+    enabled: true
+    notes: "Lectures, civic + arts events. Good structured data."
+
+  - name: SIFF
+    base_url: https://www.siff.net
+    listing_urls:
+      - https://www.siff.net/calendar
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/cinema/in-theaters/[^/?]+'
+      - '/programs-and-events/[^/?]+'
+      - '/festival/[^/?]+'
+    deny_patterns:
+      - '/about/'
+      - '/support/'
+      - '/press/'
+      - '/cinema/box-office'
+      - '/cinema/venue-rentals'
+      - '/cinema/cinema-venues'
+      - '/festival/submissions'
+      - '/festival/archives'
+      - '/festival/passes'
+    max_pages_per_run: 40
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Seattle film fest + year-round cinema. Calendar at /calendar.
+      Individual pages at /cinema/in-theaters/[slug] and /programs-and-events/[slug].
+
+  - name: The Crocodile
+    base_url: https://www.thecrocodile.com
+    listing_urls:
+      - https://www.thecrocodile.com/calendar
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/event/'
+      - '/calendar/[^/?]+'
+    deny_patterns:
+      - '/calendar$'
+    max_pages_per_run: 30
+    seattle_scoped: true
+    enabled: false
+    notes: >
+      Venue no longer hosts its own event calendar. Events are now listed on
+      TicketWeb at ticketweb.com/venue/the-crocodile-seattle-wa/10352.
+      To re-enable: add a dedicated source with base_url=https://www.ticketweb.com
+      and the TicketWeb venue listing URL.
+
+  - name: Showbox Presents
+    base_url: https://www.showboxpresents.com
+    listing_urls:
+      - https://www.showboxpresents.com/events/all
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/events/detail/\d+'
+    deny_patterns:
+      - '/events/rss'
+      - '/events/all'
+    max_pages_per_run: 30
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Showbox + Showbox SODO concerts. Listing page is /events/all (not /events/).
+      Individual events at /events/detail/[numeric-id]. JS-rendered.
+
+  - name: STG Presents
+    base_url: https://www.stgpresents.org
+    listing_urls:
+      - https://www.stgpresents.org/calendar/
+    crawl_strategy: auto
+    allow_patterns:
+      - '/calendar/event'
+      - '/show/'
+      - '/event/'
+    deny_patterns:
+      - '/calendar/$'
+      - '/press/'
+      - '/about/'
+    max_pages_per_run: 40
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Paramount, Moore, Neptune. Broadway + touring.
+      NOTE: site geo-blocks non-US IPs. Only works from a US IP or via proxy.
+
+  - name: MoPOP
+    base_url: https://www.mopop.org
+    listing_urls:
+      - https://www.mopop.org/events
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/events/[^/]+'
+    deny_patterns:
+      - '^https://www\.mopop\.org/events$'
+      - '/about/'
+    max_pages_per_run: 30
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Museum of Pop Culture. Listing URL is /events (no trailing slash).
+      Individual events at /events/[slug]. Changed wait_until to 'load' to
+      avoid networkidle timeout on heavy SPA.
+
+  - name: Pacific Science Center
+    base_url: https://www.pacificsciencecenter.org
+    listing_urls:
+      - https://www.pacificsciencecenter.org/programs/
+      - https://www.pacificsciencecenter.org/events/
+    crawl_strategy: auto
+    allow_patterns:
+      - '/programs/[^/]+'
+      - '/events/[^/]+'
+    deny_patterns:
+      - '/programs/$'
+      - '/events/$'
+    max_pages_per_run: 30
+    seattle_scoped: true
+    respect_robots: false      # WAF returns 403 fetching /robots.txt; actual content is Disallow: (allow-all)
+    enabled: true
+    notes: "Family science events and programs."
+
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # POST-MVP  (enabled: false — enable source-by-source after MVP validation)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  - name: Jazz Alley
+    base_url: https://www.jazzalley.com
+    listing_urls: [https://www.jazzalley.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: The Triple Door
+    base_url: https://www.thetripledoor.net
+    listing_urls: [https://www.thetripledoor.net/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: On the Boards
+    base_url: https://www.ontheboards.org
+    listing_urls: [https://www.ontheboards.org/performances/]
+    crawl_strategy: auto
+    allow_patterns: ['/performance/', '/event/']
+    seattle_scoped: true
+    enabled: true
+    notes: "Contemporary performance venue."
+
+  - name: 5th Avenue Theatre
+    base_url: https://www.5thave.org
+    listing_urls: [https://www.5thave.org/shows/]
+    crawl_strategy: auto
+    allow_patterns: ['/show/', '/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Tractor Tavern
+    base_url: https://www.tractortavern.com
+    listing_urls: [https://www.tractortavern.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Neumos
+    base_url: https://www.neumos.com
+    listing_urls: [https://www.neumos.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Nectar Lounge
+    base_url: https://www.nectarlounge.com
+    listing_urls: [https://www.nectarlounge.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Barboza Seattle
+    base_url: https://www.barbozaseattle.com
+    listing_urls: [https://www.barbozaseattle.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Chop Suey
+    base_url: https://www.chopsueynightclub.com
+    listing_urls: [https://www.chopsueynightclub.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Sunset Tavern
+    base_url: https://www.sunsettavern.com
+    listing_urls: [https://www.sunsettavern.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Conor Byrne Pub
+    base_url: https://www.conorbyrnepub.com
+    listing_urls: [https://www.conorbyrnepub.com/calendar/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/', '/calendar/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: The Royal Room
+    base_url: https://www.theroyalroomseattle.com
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Vera Project
+    base_url: https://theveraproject.org
+    listing_urls: [https://theveraproject.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/', '/class/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: NW Film Forum
+    base_url: https://nwfilmforum.org
+    listing_urls: [https://nwfilmforum.org/calendar/]
+    crawl_strategy: auto
+    allow_patterns: ['/film/', '/event/', '/program/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Seattle Art Museum
+    base_url: https://www.seattleartmuseum.org
+    listing_urls: [https://www.seattleartmuseum.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/', '/program/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Seattle Rep
+    base_url: https://www.seattlerep.org
+    listing_urls: [https://www.seattlerep.org/plays-events/]
+    crawl_strategy: auto
+    allow_patterns: ['/play/', '/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Seattle Opera
+    base_url: https://www.seattleopera.org
+    listing_urls: [https://www.seattleopera.org/tickets-and-events/]
+    crawl_strategy: auto
+    allow_patterns: ['/opera/', '/event/', '/tickets/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Museum of Flight
+    base_url: https://www.museumofflight.org
+    listing_urls: [https://www.museumofflight.org/programs/]
+    crawl_strategy: auto
+    allow_patterns: ['/program/', '/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Phinney Center
+    base_url: https://www.phinneycenter.org
+    listing_urls: [https://www.phinneycenter.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Climate Pledge Arena
+    base_url: https://www.climatepledgearena.com
+    listing_urls: [https://www.climatepledgearena.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Fremont Abbey
+    base_url: https://www.fremontabbey.org
+    listing_urls: [https://www.fremontabbey.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Eventbrite Seattle
+    base_url: https://www.eventbrite.com
+    listing_urls: [https://www.eventbrite.com/d/wa--seattle/events/]
+    crawl_strategy: static
+    allow_patterns: ['/e/']
+    deny_patterns: ['/o/', '/b/']
+    max_pages_per_run: 80
+    seattle_scoped: true
+    enabled: true
+    notes: "Very high volume. Enable after MVP is stable."
+
+  - name: Pioneer Square Events
+    base_url: https://pioneersquare.org
+    listing_urls: [https://pioneersquare.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: The Pantry Seattle
+    base_url: https://thepantryseattle.com
+    listing_urls: [https://thepantryseattle.com/calendar/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/', '/class/']
+    seattle_scoped: true
+    enabled: true
+    notes: "Cooking classes and food events."
+
+  - name: Hotel Sorrento
+    base_url: https://www.hotelsorrento.com
+    listing_urls: [https://www.hotelsorrento.com/happenings/]
+    crawl_strategy: auto
+    allow_patterns: ['/happenings/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Stoup Brewing
+    base_url: https://www.stoupbrewing.com
+    listing_urls: [https://www.stoupbrewing.com/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/']
+    seattle_scoped: true
+    enabled: true
+
+  - name: Jack Straw Cultural Center
+    base_url: https://www.jackstraw.org
+    listing_urls: [https://www.jackstraw.org/events/]
+    crawl_strategy: auto
+    allow_patterns: ['/event/', '/program/']
+    seattle_scoped: true
+    enabled: true
+
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ONE-OFF EVENT PAGES  (single_page: true)
+  #
+  # listing_urls point directly to event pages — URL discovery is skipped.
+  # Update listing_urls to the specific event or show page before enabling.
+  # Tip: set ENABLE_LLM_FALLBACK=true for best extraction on non-schema.org pages.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  - name: Emerald City Comedy
+    base_url: https://www.emeraldcitycomedy.com
+    listing_urls:
+      - https://www.emeraldcitycomedy.com/events/
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 5
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Emerald City Comedy Club upcoming shows.
+      Update listing_urls to specific show pages for better extraction.
+
+  - name: Pokemon Regionals Seattle
+    base_url: https://www.pokemon.com
+    listing_urls:
+      - https://www.pokemon.com/us/play-pokemon/pokemon-events/find-a-pokemon-event/
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 1
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Pokemon Regional Championships Seattle event page.
+      Update listing_url to the specific tournament/event detail page.
+
+  - name: Shibuya HiFi Events
+    base_url: https://www.shibuyahifi.com
+    listing_urls:
+      - https://www.shibuyahifi.com/events
+      - https://www.shibuyahifi.com/shows
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 2
+    seattle_scoped: true
+    enabled: true
+    notes: "Shibuya HiFi record store & venue events in Seattle."
+
+  - name: Jazz Alley Artist Show
+    base_url: https://www.jazzalley.com
+    listing_urls:
+      - https://www.jazzalley.com/events/
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 3
+    seattle_scoped: true
+    enabled: true
+    notes: >
+      Jazz Alley specific artist show pages.
+      Update listing_urls to individual show detail pages for best extraction.
+
+  - name: Cirque du Soleil Echo Seattle
+    base_url: https://www.cirquedusoleil.com
+    listing_urls:
+      - https://www.cirquedusoleil.com/echo
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 1
+    seattle_scoped: true
+    enabled: true
+    notes: "Cirque du Soleil ECHO show at Climate Pledge Arena, Seattle."
+
+  - name: Pacific Bonsai Museum Events
+    base_url: https://www.pacificbonsaimuseum.org
+    listing_urls:
+      - https://www.pacificbonsaimuseum.org/events/
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 5
+    seattle_scoped: true
+    enabled: true
+    notes: "Pacific Bonsai Museum special events and sake tasting events."
+
+  - name: KLab Seattle Events
+    base_url: https://www.eventbrite.com
+    listing_urls:
+      - https://www.eventbrite.com/o/klab-seattle
+    crawl_strategy: static
+    single_page: true
+    max_pages_per_run: 5
+    seattle_scoped: true
+    respect_robots: false
+    enabled: true
+    notes: >
+      KLab Seattle events via Eventbrite organizer page.
+      Update listing_urls to specific Eventbrite event URLs (/e/...) for best extraction.
