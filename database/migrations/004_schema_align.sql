@@ -83,18 +83,28 @@ WHERE  expires_at IS NOT NULL
   AND  expires_at < NOW()
   AND  is_active = TRUE;
 
+-- ── Helper: resolve event start time across both crawlers ─────────────────────
+-- Ravi's crawler writes to the start_time column (TIMESTAMPTZ).
+-- Amrita's crawler writes start date into payload->>'startDate' (text 'YYYY-MM-DD').
+-- This expression returns a TIMESTAMPTZ for filtering/sorting from either source.
+
 -- ── RPC: date + is_free filtered semantic search ──────────────────────────────
--- Replaces the existing search_events_by_embedding RPC.
--- Adds optional date_from, date_to, and is_free filter params
--- so the Node.js /api/chat can pass query constraints from parsed user intent.
+-- Covers both crawlers. Filtering rules:
+--   1. Event must not be in the past:
+--      - If expires_at is set: expires_at > NOW()  (Ravi new + Amrita events)
+--      - Else if start_time is set: start_time > NOW() (old Ravi rows before migration)
+--      - Else (no date info): include (give benefit of the doubt)
+--   2. is_active must be TRUE (Ravi's flag; set to TRUE by default for Amrita rows)
+--   3. Optional date_from / date_to window from parsed query constraints
+--   4. Optional is_free filter
 
 CREATE OR REPLACE FUNCTION search_events_by_embedding(
   query_embedding   VECTOR(1024),
-  match_threshold   FLOAT     DEFAULT 0.72,
-  match_count       INT       DEFAULT 10,
+  match_threshold   FLOAT       DEFAULT 0.72,
+  match_count       INT         DEFAULT 10,
   date_from         TIMESTAMPTZ DEFAULT NULL,
   date_to           TIMESTAMPTZ DEFAULT NULL,
-  filter_is_free    BOOLEAN   DEFAULT NULL
+  filter_is_free    BOOLEAN     DEFAULT NULL
 )
 RETURNS TABLE (
   id          TEXT,
@@ -110,10 +120,22 @@ BEGIN
     e.payload
   FROM kickflip_events e
   WHERE
-    (e.expires_at IS NULL OR e.expires_at > NOW())
-    AND (date_from IS NULL    OR COALESCE((e.payload->>'startDate')::DATE, NOW()::DATE) >= date_from::DATE)
-    AND (date_to   IS NULL    OR COALESCE((e.payload->>'startDate')::DATE, NOW()::DATE) <= date_to::DATE)
+    -- ① Not a past event (works for both crawlers)
+    CASE
+      WHEN e.expires_at IS NOT NULL THEN e.expires_at > NOW()
+      WHEN e.start_time IS NOT NULL THEN e.start_time > NOW()
+      ELSE TRUE
+    END
+    -- ② Ravi's active flag
+    AND e.is_active = TRUE
+    -- ③ Optional date window (uses start_time for Ravi rows, payload field for Amrita rows)
+    AND (date_from IS NULL OR
+         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
+    AND (date_to   IS NULL OR
+         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
+    -- ④ Optional free filter
     AND (filter_is_free IS NULL OR e.is_free = filter_is_free)
+    -- ⑤ Similarity threshold
     AND (1 - (e.embedding <=> query_embedding)) >= match_threshold
   ORDER BY similarity DESC
   LIMIT match_count;
@@ -122,12 +144,13 @@ $$;
 
 -- ── RPC: chronological fallback (no embedding required) ───────────────────────
 -- Used by Node.js when embedding API is unavailable or query returns 0 results.
+-- Same past-event filter logic as semantic search.
 
 CREATE OR REPLACE FUNCTION search_events_chronological(
-  result_limit  INT         DEFAULT 10,
-  date_from     TIMESTAMPTZ DEFAULT NULL,
-  date_to       TIMESTAMPTZ DEFAULT NULL,
-  filter_is_free BOOLEAN    DEFAULT NULL
+  result_limit   INT         DEFAULT 10,
+  date_from      TIMESTAMPTZ DEFAULT NULL,
+  date_to        TIMESTAMPTZ DEFAULT NULL,
+  filter_is_free BOOLEAN     DEFAULT NULL
 )
 RETURNS TABLE (
   id      TEXT,
@@ -139,11 +162,22 @@ BEGIN
   SELECT e.id, e.payload
   FROM kickflip_events e
   WHERE
-    (e.expires_at IS NULL OR e.expires_at > NOW())
-    AND COALESCE((e.payload->>'startDate')::DATE, NOW()::DATE) >= COALESCE(date_from::DATE, NOW()::DATE)
-    AND (date_to IS NULL OR COALESCE((e.payload->>'startDate')::DATE, NOW()::DATE) <= date_to::DATE)
+    -- ① Not a past event
+    CASE
+      WHEN e.expires_at IS NOT NULL THEN e.expires_at > NOW()
+      WHEN e.start_time IS NOT NULL THEN e.start_time > NOW()
+      ELSE TRUE
+    END
+    -- ② Ravi's active flag
+    AND e.is_active = TRUE
+    -- ③ Optional date window
+    AND (date_from IS NULL OR
+         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
+    AND (date_to IS NULL OR
+         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
+    -- ④ Optional free filter
     AND (filter_is_free IS NULL OR e.is_free = filter_is_free)
-  ORDER BY (e.payload->>'startDate') ASC NULLS LAST
+  ORDER BY COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) ASC NULLS LAST
   LIMIT result_limit;
 END;
 $$;
