@@ -1,0 +1,20 @@
+name: "SIFF"
+
+# ── Event detail page ─────────────────────────────────────────────────────────
+# URL discovery is handled by sources.yaml allow_patterns — no listing config needed.
+event:
+  title_selector: "h1"
+
+  # Showtimes section — SIFF renders screening dates as day headings via JS.
+  # Tries common class patterns; falls through to heuristics if none match.
+  start_date_selector: ".showtime-date, .screening-date, .schedule-date, .film-date, [class*='showtime'] h3, [class*='showtime'] h4, [class*='schedule'] h3, [class*='schedule'] h4"
+
+  # Venue: SIFF always links to cinema venue pages at /cinema/cinema-venues/*
+  venue_selector: "a[href*='cinema-venues']"
+
+  # Description: main content paragraph
+  description_selector: "main p, .film-synopsis p, .synopsis p, article p"
+
+  # Hero image
+  image_selector: "main img, .film-hero img, article img"
+  image_attr: "src"

@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Site Profile Schema Reference
+#
+# File naming: <slugified_source_name>.yaml
+#   e.g. source name "Seattle ACM" → seattle_acm.yaml
+#
+# Drop this file into site_profiles/ to override heuristic parsing
+# for a specific source. Selectors use standard CSS syntax.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Human-readable name (for logging)
+name: "Example Site"
+
+# ── Listing page config ───────────────────────────────────────────────────────
+listing:
+  # CSS selector for links to individual event pages
+  event_link_selector: "a.event-card-link"
+  # Which attribute holds the URL (default: href)
+  event_link_attr: "href"
+
+# ── Event detail page config ──────────────────────────────────────────────────
+event:
+  # Title
+  title_selector: "h1.event-title"
+
+  # Start date — selector + optional attribute
+  # If start_date_attr is set, the attribute value is used instead of text
+  start_date_selector: ".event-date[data-date]"
+  start_date_attr: "data-date"         # omit to use element text
+
+  # Start time (combined with start_date if present)
+  start_time_selector: ".event-time"
+
+  # End date/time (optional)
+  end_date_selector: null
+
+  # Location
+  venue_selector: ".venue-name"
+  address_selector: ".venue-address"
+  city_selector: null
+  state_selector: null
+
+  # Pricing
+  price_selector: ".ticket-price"
+
+  # Ticket purchase link
+  ticket_link_selector: "a.buy-tickets-btn"
+
+  # Hero image
+  image_selector: "img.event-hero"
+  image_attr: "src"                    # or "data-src" for lazy-loaded images
+
+  # Event description
+  description_selector: ".event-description"

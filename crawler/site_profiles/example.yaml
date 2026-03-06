@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Example site profile — copy and customise for a real site.
+#
+# To activate: rename to match your source name (slugified).
+#   source name: "Seattle ACM"  →  file: seattle_acm.yaml
+#
+# Test selectors in browser DevTools ($$("selector")) before committing.
+# ─────────────────────────────────────────────────────────────────────────────
+name: "Example Events Site"
+
+listing:
+  event_link_selector: "article.event-card a"
+  event_link_attr: "href"
+
+event:
+  title_selector: "h1.event-title, h1.page-title"
+
+  start_date_selector: "time[datetime]"
+  start_date_attr: "datetime"
+  start_time_selector: null
+
+  end_date_selector: null
+
+  venue_selector: ".venue-name, [itemprop='location'] .name"
+  address_selector: ".venue-address, [itemprop='address']"
+  city_selector: null
+  state_selector: null
+
+  price_selector: ".event-price, .ticket-cost"
+  ticket_link_selector: "a.buy-tickets, a[href*='eventbrite'], a[href*='ticketmaster']"
+
+  image_selector: ".event-hero img, .event-image img"
+  image_attr: "src"
+
+  description_selector: ".event-description, .event-body, article .content"
