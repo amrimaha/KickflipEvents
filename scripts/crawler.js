@@ -13,6 +13,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
+import { jsonrepair } from 'jsonrepair';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { embedBatch } from '../services/embeddingService.js';
@@ -126,7 +127,7 @@ async function searchWithClaude(search) {
     const response = await anthropic.messages.create(
       {
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: 8192,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: conversationMessages,
       },
@@ -166,8 +167,16 @@ async function searchWithClaude(search) {
     console.log(`  ✅ "${search.name}": ${events.length} events found`);
     return events;
   } catch (err) {
-    console.warn(`  ⚠️  JSON parse failed for "${search.name}": ${err.message}`);
-    return [];
+    console.warn(`  ⚠️  JSON parse failed, attempting repair for "${search.name}": ${err.message}`);
+    try {
+      const repaired = jsonrepair(jsonMatch[0]);
+      const events = JSON.parse(repaired);
+      console.log(`  ✅ "${search.name}": ${events.length} events found (after repair)`);
+      return events;
+    } catch (repairErr) {
+      console.warn(`  ❌  Repair also failed for "${search.name}": ${repairErr.message}`);
+      return [];
+    }
   }
 }
 
