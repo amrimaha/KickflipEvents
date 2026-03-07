@@ -1,17 +1,10 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration 008: Fix RPCs to return usable payload for both crawlers
+-- Migration 008 (v2): Fix RPCs — add explicit ::TIMESTAMPTZ casts on start_time
 --
--- Problem:
---   Amrita's crawler stores event data in the `payload` JSONB column.
---   Ravi's crawler stores data in individual columns (title, start_time,
---   venue, image_url, etc.) and never writes to `payload`.
---   The Node.js server spreads `row.payload` — so Ravi's events returned
---   null payload and showed up as empty cards on the frontend.
---
--- Fix:
---   Both RPCs now return COALESCE(payload, constructed_json) so Ravi's
---   events get a payload built from their individual columns, and Amrita's
---   events continue to use their existing payload unchanged.
+-- start_time is stored as TEXT in kickflip_events.
+-- TO_CHAR() and timestamp comparisons require a timestamp type, not text.
+-- Fix: cast start_time via NULLIF(e.start_time,'')::TIMESTAMPTZ everywhere.
+-- NULLIF guards against empty-string values that would cause a cast error.
 --
 -- Safe to run multiple times (CREATE OR REPLACE).
 -- Run in: Supabase SQL Editor → paste → Run
@@ -36,14 +29,13 @@ BEGIN
   SELECT
     e.id,
     (1 - (e.embedding <=> query_embedding))::FLOAT AS similarity,
-    -- Return existing payload for Amrita's events, or construct one for Ravi's
     COALESCE(
       e.payload,
       jsonb_build_object(
         'title',           e.title,
-        'startDate',       TO_CHAR(e.start_time, 'YYYY-MM-DD'),
-        'date',            TO_CHAR(e.start_time, 'YYYY-MM-DD'),
-        'startTime',       TO_CHAR(e.start_time, 'HH24:MI'),
+        'startDate',       TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'YYYY-MM-DD'),
+        'date',            TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'YYYY-MM-DD'),
+        'startTime',       TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'HH24:MI'),
         'location',        COALESCE(e.venue, e.city, 'Seattle'),
         'locationName',    e.venue,
         'address',         e.address,
@@ -65,14 +57,16 @@ BEGIN
   WHERE
     CASE
       WHEN e.expires_at IS NOT NULL THEN e.expires_at > NOW()
-      WHEN e.start_time IS NOT NULL THEN e.start_time > NOW()
+      WHEN e.start_time IS NOT NULL THEN NULLIF(e.start_time,'')::TIMESTAMPTZ > NOW()
       ELSE TRUE
     END
     AND e.is_active = TRUE
     AND (date_from IS NULL OR
-         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
+         COALESCE(NULLIF(e.start_time,'')::TIMESTAMPTZ,
+                  (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
     AND (date_to   IS NULL OR
-         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
+         COALESCE(NULLIF(e.start_time,'')::TIMESTAMPTZ,
+                  (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
     AND (filter_is_free IS NULL OR e.is_free = filter_is_free)
     AND (1 - (e.embedding <=> query_embedding)) >= match_threshold
   ORDER BY similarity DESC
@@ -100,9 +94,9 @@ BEGIN
       e.payload,
       jsonb_build_object(
         'title',           e.title,
-        'startDate',       TO_CHAR(e.start_time, 'YYYY-MM-DD'),
-        'date',            TO_CHAR(e.start_time, 'YYYY-MM-DD'),
-        'startTime',       TO_CHAR(e.start_time, 'HH24:MI'),
+        'startDate',       TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'YYYY-MM-DD'),
+        'date',            TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'YYYY-MM-DD'),
+        'startTime',       TO_CHAR(NULLIF(e.start_time,'')::TIMESTAMPTZ, 'HH24:MI'),
         'location',        COALESCE(e.venue, e.city, 'Seattle'),
         'locationName',    e.venue,
         'address',         e.address,
@@ -124,16 +118,19 @@ BEGIN
   WHERE
     CASE
       WHEN e.expires_at IS NOT NULL THEN e.expires_at > NOW()
-      WHEN e.start_time IS NOT NULL THEN e.start_time > NOW()
+      WHEN e.start_time IS NOT NULL THEN NULLIF(e.start_time,'')::TIMESTAMPTZ > NOW()
       ELSE TRUE
     END
     AND e.is_active = TRUE
     AND (date_from IS NULL OR
-         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
+         COALESCE(NULLIF(e.start_time,'')::TIMESTAMPTZ,
+                  (e.payload->>'startDate')::TIMESTAMPTZ) >= date_from)
     AND (date_to IS NULL OR
-         COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
+         COALESCE(NULLIF(e.start_time,'')::TIMESTAMPTZ,
+                  (e.payload->>'startDate')::TIMESTAMPTZ) <= date_to)
     AND (filter_is_free IS NULL OR e.is_free = filter_is_free)
-  ORDER BY COALESCE(e.start_time, (e.payload->>'startDate')::TIMESTAMPTZ) ASC NULLS LAST
+  ORDER BY COALESCE(NULLIF(e.start_time,'')::TIMESTAMPTZ,
+                    (e.payload->>'startDate')::TIMESTAMPTZ) ASC NULLS LAST
   LIMIT result_limit;
 END;
 $$;
