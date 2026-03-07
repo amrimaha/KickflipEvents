@@ -76,17 +76,18 @@ function isWithinWindow(event, windowStart, windowEnd) {
 // ─── Build search prompt for a batch of sources ───────────────────────────────
 
 function buildBatchPrompt(sources, todayStr, windowEndStr) {
-  const siteList = sources.map(s => `site:${s.domain}`).join(' OR ');
   const siteNames = sources.map(s => s.name).join(', ');
+  const domainList = sources.map(s => s.domain).join(', ');
 
   return {
     name: siteNames,
     prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
 
-Focus on these specific sites: ${siteNames}
-Search query hint: Seattle events (${siteList})
+Search these specific websites for event listings: ${domainList}
 
-Return a JSON array of ALL events you find across these sites:
+For each site, search for "Seattle events" or browse their event calendar pages directly.
+
+Return a JSON array of ALL events you find:
 [{
   "id": "crawl-<slugified-title>-<YYYYMMDD>",
   "title": "Event Title",
@@ -105,10 +106,10 @@ Return a JSON array of ALL events you find across these sites:
 }]
 
 Rules:
-- Only include events from ${todayStr} to ${windowEndStr}
-- Use real event URLs from your search results
+- Only include events dated from ${todayStr} to ${windowEndStr}
+- Use real URLs from your search results — not example.com
 - category must be one of: music, art, food, outdoor, comedy, wellness, sports, party, other
-- Return ONLY the JSON array, no other text`,
+- Return ONLY the JSON array, no markdown, no explanation`,
   };
 }
 
