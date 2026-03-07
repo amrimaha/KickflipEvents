@@ -514,23 +514,22 @@ async def health():
 
 # ── POST /run ─────────────────────────────────────────────────────────────────
 
-async def _require_run_auth(request: Request) -> None:
+async def _require_cron_or_admin(request: Request) -> None:
     """
-    Auth for POST /run: accepts either
-      1. A plain CRON_SECRET bearer token  (used by Railway cron + manual curl)
-      2. A valid Supabase admin JWT         (used by the dashboard UI)
+    Accepts either:
+      1. A plain CRON_SECRET bearer token  (Railway cron + manual curl)
+      2. A valid Supabase admin JWT         (dashboard UI)
     """
     auth_header: str = request.headers.get("Authorization", "")
     token = auth_header.removeprefix("Bearer ").strip()
     cron_secret = os.environ.get("CRON_SECRET", "")
     if cron_secret and token == cron_secret:
-        return  # cron token accepted
-    # Fall through to full admin JWT check
+        return
     await require_admin(request)
 
 
 @app.post("/run", status_code=202, tags=["crawl"])
-async def start_crawl(request: Request, force: bool = False, _=Depends(_require_run_auth)):
+async def start_crawl(request: Request, force: bool = False, _=Depends(_require_cron_or_admin)):
     """
     Enqueue a background crawl over all enabled sources in sources.yaml.
 
@@ -594,7 +593,7 @@ async def start_crawl(request: Request, force: bool = False, _=Depends(_require_
 # ── GET /jobs ─────────────────────────────────────────────────────────────────
 
 @app.get("/jobs", tags=["jobs"])
-async def list_jobs(_: dict = Depends(require_admin)):
+async def list_jobs(_: dict = Depends(_require_cron_or_admin)):
     """
     List all jobs newest-first from the persistent database (up to 200).
 
@@ -617,7 +616,7 @@ async def list_jobs(_: dict = Depends(require_admin)):
 # ── GET /jobs/{job_id} ────────────────────────────────────────────────────────
 
 @app.get("/jobs/{job_id}", tags=["jobs"])
-async def get_job(job_id: str, _: dict = Depends(require_admin)):
+async def get_job(job_id: str, _: dict = Depends(_require_cron_or_admin)):
     """
     Return status, metadata, and (when completed) the full run summary
     including per-source results, event totals, and sample events.
@@ -642,7 +641,7 @@ async def get_job(job_id: str, _: dict = Depends(require_admin)):
 # ── GET /jobs/{job_id}/logs  (SSE) ───────────────────────────────────────────
 
 @app.get("/jobs/{job_id}/logs", tags=["jobs"])
-async def stream_job_logs(job_id: str, request: Request, _: dict = Depends(require_admin)):
+async def stream_job_logs(job_id: str, request: Request, _: dict = Depends(_require_cron_or_admin)):
     """
     Stream job log output as **Server-Sent Events** (``text/event-stream``).
 
@@ -765,7 +764,7 @@ async def stream_job_logs(job_id: str, request: Request, _: dict = Depends(requi
 # ── GET /jobs/{job_id}/logs/raw ───────────────────────────────────────────────
 
 @app.get("/jobs/{job_id}/logs/raw", tags=["jobs"])
-async def get_job_logs_raw(job_id: str, _: dict = Depends(require_admin)):
+async def get_job_logs_raw(job_id: str, _: dict = Depends(_require_cron_or_admin)):
     """
     Return the full job log as **plain text** (one JSON line per log entry).
 
