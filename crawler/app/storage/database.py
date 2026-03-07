@@ -123,7 +123,7 @@ INSERT INTO kickflip_events (
     confidence,  extraction_method,  evidence_snippets,
     raw_data,
     is_active,   first_seen_at,  last_seen_at,  updated_at,
-    expires_at
+    expires_at,  origin
 )
 VALUES (
     $1,  $2,
@@ -137,7 +137,7 @@ VALUES (
     $21, $22, $23,
     $24::jsonb,
     TRUE, NOW(), $25, NOW(),
-    $26
+    $26, 'playwright_crawl'
 )
 ON CONFLICT (id) DO UPDATE SET
     title              = EXCLUDED.title,
@@ -162,7 +162,8 @@ ON CONFLICT (id) DO UPDATE SET
     is_active          = (EXCLUDED.expires_at > NOW()),
     last_seen_at       = EXCLUDED.last_seen_at,
     updated_at         = NOW(),
-    expires_at         = EXCLUDED.expires_at
+    expires_at         = EXCLUDED.expires_at,
+    origin             = 'playwright_crawl'
 RETURNING (xmax = 0) AS inserted
 """
 
