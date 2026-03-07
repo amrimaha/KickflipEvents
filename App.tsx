@@ -494,9 +494,8 @@ const App: React.FC = () => {
         localStorage.setItem('kickflip_user', JSON.stringify(finalUser));
         setIsDrawerOpen(false);
         
-        if (!finalUser.onboardingPreferences?.completed) {
-            setShowOnboarding(true);
-        }
+        // Onboarding disabled — restore by uncommenting below
+        // if (!finalUser.onboardingPreferences?.completed) { setShowOnboarding(true); }
 
         if (pendingDraftRef.current) handleFinalizePublish(finalUser, pendingDraftRef.current);
       }
@@ -511,9 +510,8 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(savedUser);
         setUser(parsed);
-        if (!parsed.onboardingPreferences?.completed) {
-            setShowOnboarding(true);
-        }
+        // Onboarding disabled — restore by uncommenting below
+        // if (!parsed.onboardingPreferences?.completed) { setShowOnboarding(true); }
       } catch (e) {}
     }
 
@@ -1213,8 +1211,9 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {showOnboarding && (
-        <OnboardingModal 
+      {/* OnboardingModal disabled — restore by replacing false with showOnboarding */}
+      {false && (
+        <OnboardingModal
           theme={theme}
           onComplete={handleOnboardingComplete}
           onSkip={() => setShowOnboarding(false)}
