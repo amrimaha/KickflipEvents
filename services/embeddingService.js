@@ -1,12 +1,12 @@
 /**
  * embeddingService.js
  * Voyage AI wrapper for generating and querying event embeddings.
- * Model: voyage-3-lite (1024 dimensions, optimized for retrieval)
+ * Model: voyage-3 (1024 dimensions, optimized for retrieval)
  */
 
 const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
-const MODEL = 'voyage-3-lite';
+const MODEL = 'voyage-3';
 
 /**
  * Core fetch wrapper for Voyage AI API
