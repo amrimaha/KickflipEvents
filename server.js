@@ -564,14 +564,15 @@ app.post('/api/crawl', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  console.log('[crawl] Starting — window: today → +7 days');
+  const { batch } = req.body || {};
+  console.log(`[crawl] Starting — batch=${batch || 'all'}`);
 
-  // Set a longer timeout for this endpoint (crawl can take ~60s)
-  req.setTimeout(120000);
-  res.setTimeout(120000);
+  // Set a longer timeout for this endpoint (crawl can take several minutes)
+  req.setTimeout(600000);
+  res.setTimeout(600000);
 
   try {
-    const summary = await runCrawl();
+    const summary = await runCrawl({ batch });
     return res.json({
       status: 'Crawl complete',
       timestamp: new Date().toISOString(),

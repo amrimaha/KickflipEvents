@@ -26,90 +26,104 @@ settings:
 
 sources:
 
-  # ── Tier 1: Ticketing platforms (highest event density) ───────────────────
+  # ── Batch: ticketing  (highest event density) ─────────────────────────────
   - name: Eventbrite Seattle
     domain: eventbrite.com
     category: all
+    batch: ticketing
     enabled: true
     priority: 1
 
   - name: AXS Seattle
     domain: axs.com
     category: music
+    batch: ticketing
     enabled: true
     priority: 1
 
   - name: Resident Advisor Seattle
     domain: ra.co
     category: music
+    batch: ticketing
     enabled: true
     priority: 1
 
-  # ── Tier 2: Local Seattle media ────────────────────────────────────────────
+  # ── Batch: media  (local Seattle press) ───────────────────────────────────
   - name: The Stranger
     domain: thestranger.com
     category: music,art,comedy
+    batch: media
     enabled: true
     priority: 2
 
   - name: Seattle Times Events
     domain: seattletimes.com
     category: all
+    batch: media
     enabled: true
     priority: 2
 
-  # ── Tier 3: Seattle venues ─────────────────────────────────────────────────
+  # ── Batch: venues  (specific Seattle venues) ──────────────────────────────
   - name: Jazz Alley
     domain: jazzalley.com
     category: music
+    batch: venues
     enabled: true
     priority: 3
 
   - name: The Crocodile
     domain: thecrocodile.com
     category: music
+    batch: venues
     enabled: true
     priority: 3
 
   - name: Neumos
     domain: neumos.com
     category: music
+    batch: venues
     enabled: true
     priority: 3
 
   - name: Tractor Tavern
     domain: tractortavern.com
     category: music
+    batch: venues
     enabled: true
     priority: 3
 
   - name: Chop Suey
     domain: chopsuey.com
     category: music
+    batch: venues
     enabled: true
     priority: 3
 
-  # ── Tier 4: Disabled by default — enable when ready ───────────────────────
+  # ── Batch: extra  (disabled by default — enable when ready) ───────────────
   - name: Showbox Seattle
     domain: showboxpresents.com
     category: music
+    batch: extra
     enabled: false
     priority: 4
 
   - name: Ticketmaster Seattle
     domain: ticketmaster.com
     category: all
+    batch: extra
     enabled: false
     priority: 4
 
   - name: Moore Theatre
     domain: stgpresents.org
     category: music,art
+    batch: extra
     enabled: false
     priority: 4
 
   - name: Paramount Theatre
     domain: stgpresents.org
     category: music,art
+    batch: extra
     enabled: false
     priority: 4

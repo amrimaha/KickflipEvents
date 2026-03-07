@@ -239,16 +239,23 @@ async function upsertEvents(events, vectors, windowEnd) {
 
 // ─── Main crawl ───────────────────────────────────────────────────────────────
 
-export async function runCrawl() {
+/**
+ * @param {object} opts
+ * @param {string} [opts.batch]  — if set, only run sources with this batch label
+ *                                 e.g. "ticketing" | "media" | "venues" | "extra"
+ *                                 omit to run all enabled sources
+ */
+export async function runCrawl({ batch: batchFilter } = {}) {
   const startTime = Date.now();
 
   // Load config fresh on each run (picks up YAML edits without restart)
   const config = loadConfig();
   const { date_window_days = 14, batch_size = 3, max_sources_per_run = 10 } = config.settings || {};
 
-  // Filter to enabled sources, sort by priority, cap at max_sources_per_run
+  // Filter to enabled sources, optionally by batch label, sort by priority, cap
   const enabledSources = (config.sources || [])
     .filter(s => s.enabled !== false)
+    .filter(s => !batchFilter || s.batch === batchFilter)
     .sort((a, b) => (a.priority || 99) - (b.priority || 99))
     .slice(0, max_sources_per_run);
 
@@ -259,6 +266,7 @@ export async function runCrawl() {
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║          Kickflip Event Crawler              ║');
   console.log(`║  Window : ${todayStr.slice(0,10)} → ${windowEndStr.slice(0,10)} (${date_window_days}d)   ║`);
+  console.log(`║  Filter : batch=${batchFilter || 'all'}                    ║`);
   console.log(`║  Sources: ${enabledSources.length} enabled (cap: ${max_sources_per_run})              ║`);
   console.log(`║  Batches: ${batch_size} sources/call                      ║`);
   console.log('╚══════════════════════════════════════════════╝');
