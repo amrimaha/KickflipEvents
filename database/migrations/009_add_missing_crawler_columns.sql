@@ -9,14 +9,18 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE kickflip_events
-    ADD COLUMN IF NOT EXISTS image_url    TEXT,
-    ADD COLUMN IF NOT EXISTS event_url    TEXT,
-    ADD COLUMN IF NOT EXISTS ticket_url   TEXT,
-    ADD COLUMN IF NOT EXISTS venue        TEXT,
-    ADD COLUMN IF NOT EXISTS address      TEXT,
-    ADD COLUMN IF NOT EXISTS city         TEXT DEFAULT 'Seattle',
-    ADD COLUMN IF NOT EXISTS state        TEXT DEFAULT 'WA',
-    ADD COLUMN IF NOT EXISTS organizer    TEXT,
-    ADD COLUMN IF NOT EXISTS is_free      BOOLEAN,
-    ADD COLUMN IF NOT EXISTS crawl_method TEXT,
-    ADD COLUMN IF NOT EXISTS event_summary TEXT;
+    ADD COLUMN IF NOT EXISTS image_url     TEXT,
+    ADD COLUMN IF NOT EXISTS event_url     TEXT,
+    ADD COLUMN IF NOT EXISTS ticket_url    TEXT,
+    ADD COLUMN IF NOT EXISTS venue         TEXT,
+    ADD COLUMN IF NOT EXISTS address       TEXT,
+    ADD COLUMN IF NOT EXISTS city          TEXT DEFAULT 'Seattle',
+    ADD COLUMN IF NOT EXISTS state         TEXT DEFAULT 'WA',
+    ADD COLUMN IF NOT EXISTS organizer     TEXT,
+    ADD COLUMN IF NOT EXISTS is_free       BOOLEAN,
+    ADD COLUMN IF NOT EXISTS crawl_method  TEXT,
+    ADD COLUMN IF NOT EXISTS event_summary TEXT,
+    -- Required by search RPCs (008)
+    ADD COLUMN IF NOT EXISTS is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS category      TEXT,
+    ADD COLUMN IF NOT EXISTS origin        TEXT;
