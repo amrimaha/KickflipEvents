@@ -297,6 +297,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setSuggestionChips(generateSessionChips());
+    // Warm up Railway server on mount so first chat isn't slow/failing after cold start
+    const apiUrl = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+    fetch(`${apiUrl}/health`).catch(() => {/* silent — just waking the service */});
   }, []);
 
   // --- SUPABASE SYNC ---
