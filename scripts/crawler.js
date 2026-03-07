@@ -200,6 +200,7 @@ async function upsertEvents(events, vectors, windowEnd) {
 
   let stored = 0, duplicates = 0, errors = 0;
   const storedTitles = [];
+  let firstError = null;
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
@@ -218,13 +219,11 @@ async function upsertEvents(events, vectors, windowEnd) {
       payload:     event,
       embedding,
       origin:      'crawl',
-      status:      'active',
       is_active:   true,
       crawled_at:  new Date().toISOString(),
       source_url:  event.link || null,
       crawl_source: event.crawlSource || null,
       expires_at:  expiresAt.toISOString(),
-      updated_at:  new Date().toISOString(),
     };
 
     const { error } = await supabase
@@ -235,7 +234,8 @@ async function upsertEvents(events, vectors, windowEnd) {
       if (error.code === '23505') {
         duplicates++;
       } else {
-        console.error(`  ❌ "${event.title}": ${error.message}`);
+        console.error(`  ❌ "${event.title}": ${error.message} (code: ${error.code})`);
+        if (!firstError) firstError = `${error.message} (code: ${error.code})`;
         errors++;
       }
     } else {
@@ -244,7 +244,7 @@ async function upsertEvents(events, vectors, windowEnd) {
     }
   }
 
-  return { stored, duplicates, errors, storedTitles };
+  return { stored, duplicates, errors, storedTitles, firstError };
 }
 
 // ─── Main crawl ───────────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ export async function runCrawl({ batch: batchFilter } = {}) {
 
   // Step 5: Upsert
   console.log(`\n💾 STEP 5: Storing ${validEvents.length} events in Supabase...`);
-  const { stored, duplicates, errors, storedTitles } = await upsertEvents(validEvents, vectors, windowEnd);
+  const { stored, duplicates, errors, storedTitles, firstError } = await upsertEvents(validEvents, vectors, windowEnd);
 
   // Step 6: Clean expired cache
   console.log('\n🧹 STEP 6: Cleaning expired query cache...');
@@ -373,6 +373,7 @@ export async function runCrawl({ batch: batchFilter } = {}) {
     eventsStored: stored,
     duplicates,
     errors,
+    firstError: firstError || null,
     sourcesRun: enabledSources.length,
     durationMs,
     storedEvents: storedTitles,
