@@ -1,0 +1,9 @@
+# nixpacks build config for the Kickflip Python crawler service
+# Installs Playwright's Chromium browser during the build phase so it's
+# available when the container starts on Railway.
+
+[phases.install]
+cmds = [
+    "pip install -r requirements.txt",
+    "playwright install chromium --with-deps"
+]
