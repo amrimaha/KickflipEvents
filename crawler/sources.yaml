@@ -140,8 +140,21 @@ sources:
     notes: >
       Venue no longer hosts its own event calendar. Events are now listed on
       TicketWeb at ticketweb.com/venue/the-crocodile-seattle-wa/10352.
-      To re-enable: add a dedicated source with base_url=https://www.ticketweb.com
-      and the TicketWeb venue listing URL.
+      Replaced by The Crocodile (TicketWeb) source below.
+
+  - name: The Crocodile (TicketWeb)
+    base_url: https://www.ticketweb.com
+    listing_urls:
+      - https://www.ticketweb.com/venue/the-crocodile-seattle-wa/10352
+    crawl_strategy: dynamic
+    allow_patterns:
+      - '/event/[^/?]+'
+    deny_patterns:
+      - '/checkout'
+      - '/cart'
+    max_pages_per_run: 30
+    seattle_scoped: true
+    enabled: true
 
   - name: Showbox Presents
     base_url: https://www.showboxpresents.com
