@@ -37,6 +37,7 @@ from pydantic import BaseModel
 
 from app.auth.dependencies import require_admin
 from app.config import settings
+import os
 from app.crawlers.orchestrator import run_all_sources
 from app.jobs.manager import JobState, JobStatus, job_manager
 from app.models.run import RunSummary
@@ -513,8 +514,23 @@ async def health():
 
 # ── POST /run ─────────────────────────────────────────────────────────────────
 
+async def _require_run_auth(request: Request) -> None:
+    """
+    Auth for POST /run: accepts either
+      1. A plain CRON_SECRET bearer token  (used by Railway cron + manual curl)
+      2. A valid Supabase admin JWT         (used by the dashboard UI)
+    """
+    auth_header: str = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    cron_secret = os.environ.get("CRON_SECRET", "")
+    if cron_secret and token == cron_secret:
+        return  # cron token accepted
+    # Fall through to full admin JWT check
+    await require_admin(request)
+
+
 @app.post("/run", status_code=202, tags=["crawl"])
-async def start_crawl(force: bool = False, _: dict = Depends(require_admin)):
+async def start_crawl(request: Request, force: bool = False, _=Depends(_require_run_auth)):
     """
     Enqueue a background crawl over all enabled sources in sources.yaml.
 
