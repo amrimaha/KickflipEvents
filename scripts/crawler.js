@@ -2,19 +2,41 @@
  * crawler.js
  * Daily batch crawler — uses Claude web_search to find real Seattle events.
  *
- * Why web_search instead of raw HTML fetch:
- * Most event sites (Eventbrite, RA, Axs) are JS-rendered — a plain fetch
- * returns an empty shell. Claude's built-in web_search handles this correctly.
+ * Configuration: edit crawl-sources.yaml at the repo root to control which
+ * sites are searched, the date window, and batch size.
  *
- * Strategy: 3 targeted searches covering the main Seattle event categories.
- * Each search = 1 Claude call with web_search tool.
- * Results are deduplicated, date-filtered, embedded, and stored in Supabase.
+ * Run on demand: POST /api/crawl  Authorization: Bearer <CRON_SECRET>
  */
 
 import 'dotenv/config';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import yaml from 'js-yaml';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { embedBatch } from '../services/embeddingService.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ─── Load config from crawl-sources.yaml ─────────────────────────────────────
+
+function loadConfig() {
+  const configPath = resolve(__dirname, '../crawl-sources.yaml');
+  try {
+    const raw = readFileSync(configPath, 'utf8');
+    return yaml.load(raw);
+  } catch (err) {
+    console.warn('[crawler] Could not read crawl-sources.yaml, using defaults:', err.message);
+    return {
+      settings: { date_window_days: 14, batch_size: 3, max_sources_per_run: 10 },
+      sources: [
+        { name: 'Eventbrite Seattle', domain: 'eventbrite.com', category: 'all', enabled: true, priority: 1 },
+        { name: 'The Stranger',       domain: 'thestranger.com', category: 'music,art,comedy', enabled: true, priority: 2 },
+      ],
+    };
+  }
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -23,17 +45,13 @@ const supabase = createClient(
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const WINDOW_DAYS = 7;
+// ─── Date helpers ─────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────
-// DATE HELPERS
-// ─────────────────────────────────────────────
-
-function getWindowBounds() {
+function getWindowBounds(windowDays) {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   const end = new Date(now);
-  end.setDate(end.getDate() + WINDOW_DAYS);
+  end.setDate(end.getDate() + windowDays);
   return { windowStart: now, windowEnd: end };
 }
 
@@ -55,21 +73,20 @@ function isWithinWindow(event, windowStart, windowEnd) {
   return { valid: true, reason: 'in-window' };
 }
 
-// ─────────────────────────────────────────────
-// SEARCH QUERIES — 2 targeted Claude+web_search calls
-// ─────────────────────────────────────────────
+// ─── Build search prompt for a batch of sources ───────────────────────────────
 
-function buildSearches(todayStr, windowEndStr) {
-  return [
-    {
-      name: 'Music, Nightlife & Arts',
-      prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
+function buildBatchPrompt(sources, todayStr, windowEndStr) {
+  const siteList = sources.map(s => `site:${s.domain}`).join(' OR ');
+  const siteNames = sources.map(s => s.name).join(', ');
 
-Find events in these categories: live music, concerts, DJ nights, comedy shows, art exhibitions, gallery openings, theatre, film screenings, spoken word.
+  return {
+    name: siteNames,
+    prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
 
-Search sites like eventbrite.com, ra.co, thestranger.com, axs.com, ticketmaster.com, seattlearts.org.
+Focus on these specific sites: ${siteNames}
+Search query hint: Seattle events (${siteList})
 
-Return a JSON array of all events you find:
+Return a JSON array of ALL events you find across these sites:
 [{
   "id": "crawl-<slugified-title>-<YYYYMMDD>",
   "title": "Event Title",
@@ -84,53 +101,18 @@ Return a JSON array of all events you find:
   "link": "https://real-event-url.com",
   "organizer": "Organizer Name",
   "origin": "crawl",
-  "crawlSource": "Eventbrite"
+  "crawlSource": "${siteNames}"
 }]
 
 Rules:
 - Only include events from ${todayStr} to ${windowEndStr}
 - Use real event URLs from your search results
-- category must be one of: music, art, comedy, other
+- category must be one of: music, art, food, outdoor, comedy, wellness, sports, party, other
 - Return ONLY the JSON array, no other text`,
-    },
-    {
-      name: 'Food, Markets & Outdoor',
-      prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
-
-Find events in these categories: food festivals, night markets, farmers markets, outdoor activities, sports events, wellness classes, fitness events, community gatherings, cultural festivals.
-
-Search sites like eventbrite.com, seattle.gov, thestranger.com, downtownseattle.org, timeout.com/seattle.
-
-Return a JSON array of all events you find:
-[{
-  "id": "crawl-<slugified-title>-<YYYYMMDD>",
-  "title": "Event Title",
-  "date": "Sun, Mar 2 2026",
-  "startDate": "2026-03-02",
-  "startTime": "10:00 AM",
-  "location": "Venue Name, Seattle WA",
-  "description": "2-3 sentences about the event vibe and what to expect",
-  "category": "food",
-  "vibeTags": ["#market", "#outdoor"],
-  "price": "Free",
-  "link": "https://real-event-url.com",
-  "organizer": "Organizer Name",
-  "origin": "crawl",
-  "crawlSource": "Seattle.gov"
-}]
-
-Rules:
-- Only include events from ${todayStr} to ${windowEndStr}
-- Use real event URLs from your search results
-- category must be one of: food, outdoor, wellness, sports, fashion, party, other
-- Return ONLY the JSON array, no other text`,
-    },
-  ];
+  };
 }
 
-// ─────────────────────────────────────────────
-// RUN ONE CLAUDE WEB_SEARCH CALL
-// ─────────────────────────────────────────────
+// ─── Run one Claude web_search call ───────────────────────────────────────────
 
 async function searchWithClaude(search) {
   console.log(`\n  🔍 Searching: "${search.name}"...`);
@@ -173,7 +155,6 @@ async function searchWithClaude(search) {
     } else break;
   }
 
-  // Parse JSON array from Claude's response
   const jsonMatch = finalText.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
     console.warn(`  ⚠️  No JSON array in response for "${search.name}"`);
@@ -189,26 +170,19 @@ async function searchWithClaude(search) {
   }
 }
 
-// ─────────────────────────────────────────────
-// DEDUPLICATE BY TITLE + DATE
-// ─────────────────────────────────────────────
+// ─── Deduplicate by title + date ──────────────────────────────────────────────
 
 function deduplicate(events) {
   const seen = new Map();
-  const unique = [];
-  for (const event of events) {
+  return events.filter(event => {
     const key = `${(event.title || '').toLowerCase().trim()}__${event.startDate || ''}`;
-    if (!seen.has(key)) {
-      seen.set(key, true);
-      unique.push(event);
-    }
-  }
-  return unique;
+    if (seen.has(key)) return false;
+    seen.set(key, true);
+    return true;
+  });
 }
 
-// ─────────────────────────────────────────────
-// UPSERT WITH EMBEDDINGS INTO SUPABASE
-// ─────────────────────────────────────────────
+// ─── Upsert with embeddings ───────────────────────────────────────────────────
 
 async function upsertEvents(events, vectors, windowEnd) {
   const expiresAt = new Date(windowEnd);
@@ -221,7 +195,6 @@ async function upsertEvents(events, vectors, windowEnd) {
     const event = events[i];
     const embedding = vectors[i];
 
-    // Ensure id is set
     if (!event.id) {
       const slug = (event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
       const dateSlug = (event.startDate || 'undated').replace(/-/g, '');
@@ -229,18 +202,19 @@ async function upsertEvents(events, vectors, windowEnd) {
     }
 
     const row = {
-      id: event.id,
-      title: event.title || 'Untitled Event',
-      category: event.category || 'other',
-      payload: event,
+      id:          event.id,
+      title:       event.title || 'Untitled Event',
+      category:    event.category || 'other',
+      payload:     event,
       embedding,
-      origin: 'crawl',
-      status: 'active',
-      crawled_at: new Date().toISOString(),
-      source_url: event.link || null,
+      origin:      'crawl',
+      status:      'active',
+      is_active:   true,
+      crawled_at:  new Date().toISOString(),
+      source_url:  event.link || null,
       crawl_source: event.crawlSource || null,
-      expires_at: expiresAt.toISOString(),
-      updated_at: new Date().toISOString(),
+      expires_at:  expiresAt.toISOString(),
+      updated_at:  new Date().toISOString(),
     };
 
     const { error } = await supabase
@@ -263,40 +237,59 @@ async function upsertEvents(events, vectors, windowEnd) {
   return { stored, duplicates, errors, storedTitles };
 }
 
-// ─────────────────────────────────────────────
-// MAIN CRAWL
-// ─────────────────────────────────────────────
+// ─── Main crawl ───────────────────────────────────────────────────────────────
 
 export async function runCrawl() {
   const startTime = Date.now();
-  const { windowStart, windowEnd } = getWindowBounds();
-  const todayStr    = formatDate(windowStart);
+
+  // Load config fresh on each run (picks up YAML edits without restart)
+  const config = loadConfig();
+  const { date_window_days = 14, batch_size = 3, max_sources_per_run = 10 } = config.settings || {};
+
+  // Filter to enabled sources, sort by priority, cap at max_sources_per_run
+  const enabledSources = (config.sources || [])
+    .filter(s => s.enabled !== false)
+    .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+    .slice(0, max_sources_per_run);
+
+  const { windowStart, windowEnd } = getWindowBounds(date_window_days);
+  const todayStr     = formatDate(windowStart);
   const windowEndStr = formatDate(windowEnd);
 
-  console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║       Kickflip Event Crawler             ║');
-  console.log(`║  Window: ${todayStr.slice(0,10)} → ${windowEndStr.slice(0,10)}      ║`);
-  console.log('╚══════════════════════════════════════════╝');
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║          Kickflip Event Crawler              ║');
+  console.log(`║  Window : ${todayStr.slice(0,10)} → ${windowEndStr.slice(0,10)} (${date_window_days}d)   ║`);
+  console.log(`║  Sources: ${enabledSources.length} enabled (cap: ${max_sources_per_run})              ║`);
+  console.log(`║  Batches: ${batch_size} sources/call                      ║`);
+  console.log('╚══════════════════════════════════════════════╝');
+  console.log('\nEnabled sources:');
+  enabledSources.forEach(s => console.log(`  [${s.priority}] ${s.name} (${s.domain})`));
 
-  // Step 1: Run all searches (sequentially to avoid rate limits)
-  console.log('\n🔍 STEP 1: Searching for Seattle events via Claude web_search...');
-  const searches = buildSearches(todayStr, windowEndStr);
+  // Batch sources into groups of batch_size
+  const batches = [];
+  for (let i = 0; i < enabledSources.length; i += batch_size) {
+    batches.push(enabledSources.slice(i, i + batch_size));
+  }
+
+  // Step 1: Run searches
+  console.log(`\n🔍 STEP 1: Running ${batches.length} search batch(es)...`);
   let allCandidates = [];
 
-  for (const search of searches) {
+  for (const batch of batches) {
+    const search = buildBatchPrompt(batch, todayStr, windowEndStr);
     const results = await searchWithClaude(search);
     allCandidates.push(...results);
   }
 
-  console.log(`\n  → Total candidates across all searches: ${allCandidates.length}`);
+  console.log(`\n  → Total candidates: ${allCandidates.length}`);
 
   // Step 2: Deduplicate
   console.log('\n🔄 STEP 2: Deduplicating...');
   const unique = deduplicate(allCandidates);
-  console.log(`  → ${unique.length} unique events (removed ${allCandidates.length - unique.length} duplicates)`);
+  console.log(`  → ${unique.length} unique (removed ${allCandidates.length - unique.length} duplicates)`);
 
-  // Step 3: Filter to 7-day window
-  console.log('\n🗓️  STEP 3: Filtering to 7-day future window...');
+  // Step 3: Filter to window
+  console.log('\n🗓️  STEP 3: Filtering to date window...');
   const validEvents = [];
   const rejectedEvents = [];
 
@@ -309,26 +302,22 @@ export async function runCrawl() {
     }
   }
 
-  console.log(`  → ${validEvents.length} events pass the window filter`);
-  console.log(`  → ${rejectedEvents.length} rejected`);
-  if (rejectedEvents.length > 0 && rejectedEvents.length <= 5) {
-    rejectedEvents.forEach(r => console.log(r));
-  }
+  console.log(`  → ${validEvents.length} pass filter, ${rejectedEvents.length} rejected`);
 
   if (validEvents.length === 0) {
     console.log('\n⚠️  No valid events to store.');
     return {
       eventsFound: allCandidates.length, eventsRejected: rejectedEvents.length,
       eventsFiltered: 0, eventsStored: 0, duplicates: 0, errors: 0,
-      durationMs: Date.now() - startTime,
+      sourcesRun: enabledSources.length, durationMs: Date.now() - startTime,
     };
   }
 
-  // Step 4: Generate embeddings in one batch call
+  // Step 4: Generate embeddings
   console.log(`\n🧠 STEP 4: Generating Voyage AI embeddings for ${validEvents.length} events...`);
   const vectors = await embedBatch(validEvents);
 
-  // Step 5: Upsert into Supabase
+  // Step 5: Upsert
   console.log(`\n💾 STEP 5: Storing ${validEvents.length} events in Supabase...`);
   const { stored, duplicates, errors, storedTitles } = await upsertEvents(validEvents, vectors, windowEnd);
 
@@ -340,9 +329,10 @@ export async function runCrawl() {
 
   const durationMs = Date.now() - startTime;
 
-  console.log('\n══════════════════════════════════════════');
+  console.log('\n══════════════════════════════════════════════');
   console.log('✅ CRAWL COMPLETE');
-  console.log(`   Searches run     : ${searches.length}`);
+  console.log(`   Sources run      : ${enabledSources.length} (${batches.length} batch calls)`);
+  console.log(`   Date window      : ${date_window_days} days`);
   console.log(`   Events found     : ${allCandidates.length}`);
   console.log(`   After dedupe     : ${unique.length}`);
   console.log(`   After date filter: ${validEvents.length}`);
@@ -350,10 +340,10 @@ export async function runCrawl() {
   console.log(`   ── Updated exist : ${duplicates}`);
   console.log(`   ── Errors        : ${errors}`);
   console.log(`   Duration         : ${(durationMs / 1000).toFixed(1)}s`);
-  console.log('══════════════════════════════════════════');
+  console.log('══════════════════════════════════════════════');
 
   if (storedTitles.length > 0) {
-    console.log('\n📋 Events stored in Supabase:');
+    console.log('\n📋 Events stored:');
     storedTitles.forEach(t => console.log(t));
   }
 
@@ -365,6 +355,7 @@ export async function runCrawl() {
     eventsStored: stored,
     duplicates,
     errors,
+    sourcesRun: enabledSources.length,
     durationMs,
     storedEvents: storedTitles,
   };

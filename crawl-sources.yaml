@@ -1,0 +1,115 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kickflip Crawl Sources Configuration
+#
+# Edit this file to control which sites are searched, the date window,
+# and how searches are batched. Changes take effect on the next crawl run.
+#
+# To run on demand:
+#   curl -X POST https://kickflipevents-production.up.railway.app/api/crawl \
+#        -H "Authorization: Bearer <CRON_SECRET>"
+# ─────────────────────────────────────────────────────────────────────────────
+
+settings:
+  date_window_days: 14     # How many days ahead to search (14 = today + 2 weeks)
+  batch_size: 3            # How many sources to combine per Claude API call (saves cost)
+  max_sources_per_run: 10  # Hard cap — stops after this many enabled sources
+
+
+# ─── Sources ──────────────────────────────────────────────────────────────────
+# Fields:
+#   name        — human label for logs
+#   domain      — used in site: search hint to Claude
+#   category    — hint for Claude (music | art | food | outdoor | comedy | all)
+#   enabled     — set to false to skip without deleting the entry
+#   priority    — lower = searched first (1 = highest priority)
+# ─────────────────────────────────────────────────────────────────────────────
+
+sources:
+
+  # ── Tier 1: Ticketing platforms (highest event density) ───────────────────
+  - name: Eventbrite Seattle
+    domain: eventbrite.com
+    category: all
+    enabled: true
+    priority: 1
+
+  - name: AXS Seattle
+    domain: axs.com
+    category: music
+    enabled: true
+    priority: 1
+
+  - name: Resident Advisor Seattle
+    domain: ra.co
+    category: music
+    enabled: true
+    priority: 1
+
+  # ── Tier 2: Local Seattle media ────────────────────────────────────────────
+  - name: The Stranger
+    domain: thestranger.com
+    category: music,art,comedy
+    enabled: true
+    priority: 2
+
+  - name: Seattle Times Events
+    domain: seattletimes.com
+    category: all
+    enabled: true
+    priority: 2
+
+  # ── Tier 3: Seattle venues ─────────────────────────────────────────────────
+  - name: Jazz Alley
+    domain: jazzalley.com
+    category: music
+    enabled: true
+    priority: 3
+
+  - name: The Crocodile
+    domain: thecrocodile.com
+    category: music
+    enabled: true
+    priority: 3
+
+  - name: Neumos
+    domain: neumos.com
+    category: music
+    enabled: true
+    priority: 3
+
+  - name: Tractor Tavern
+    domain: tractortavern.com
+    category: music
+    enabled: true
+    priority: 3
+
+  - name: Chop Suey
+    domain: chopsuey.com
+    category: music
+    enabled: true
+    priority: 3
+
+  # ── Tier 4: Disabled by default — enable when ready ───────────────────────
+  - name: Showbox Seattle
+    domain: showboxpresents.com
+    category: music
+    enabled: false
+    priority: 4
+
+  - name: Ticketmaster Seattle
+    domain: ticketmaster.com
+    category: all
+    enabled: false
+    priority: 4
+
+  - name: Moore Theatre
+    domain: stgpresents.org
+    category: music,art
+    enabled: false
+    priority: 4
+
+  - name: Paramount Theatre
+    domain: stgpresents.org
+    category: music,art
+    enabled: false
+    priority: 4
