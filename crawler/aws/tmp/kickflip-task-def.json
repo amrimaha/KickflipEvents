@@ -1,0 +1,74 @@
+{
+  "family": "kickflip-crawler",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::895618744548:role/kickflip-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::895618744548:role/kickflip-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "kickflip-crawler",
+      "image": "895618744548.dkr.ecr.us-east-1.amazonaws.com/kickflip-crawler:latest",
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/kickflip/crawler",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "crawler"
+        }
+      },
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:DATABASE_URL::"
+        },
+        {
+          "name": "LLM_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:LLM_API_KEY::"
+        },
+        {
+          "name": "CRON_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:CRON_SECRET::"
+        },
+        {
+          "name": "SUPABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:SUPABASE_URL::"
+        },
+        {
+          "name": "SUPABASE_SERVICE_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:SUPABASE_SERVICE_KEY::"
+        },
+        {
+          "name": "SUPABASE_JWKS_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:895618744548:secret:kickflip/crawler/prod-lL0zl9:SUPABASE_JWKS_URL::"
+        }
+      ],
+      "environment": [
+        {
+          "name": "ENABLE_PLAYWRIGHT",
+          "value": "true"
+        },
+        {
+          "name": "PLAYWRIGHT_BROWSERS_PATH",
+          "value": "/ms-playwright"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "INFO"
+        },
+        {
+          "name": "LLM_PROVIDER",
+          "value": "gemini"
+        },
+        {
+          "name": "LOG_S3_BUCKET",
+          "value": "kickflip-crawler-logs-895618744548"
+        }
+      ]
+    }
+  ]
+}

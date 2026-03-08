@@ -39,6 +39,28 @@ from app.auth.dependencies import require_admin
 from app.config import settings
 import os
 from app.crawlers.orchestrator import run_all_sources
+
+
+# ── ECS task ID helper (for CloudWatch log streaming) ─────────────────────────
+
+async def _get_ecs_task_id() -> Optional[str]:
+    """
+    Read ECS container metadata to get the short task ID.
+    Returns None when not running on ECS (local dev / Railway).
+    Used to populate kickflip_jobs.ecs_task_id so the log-streaming Lambda
+    can locate the correct CloudWatch log stream for a running job.
+    """
+    meta_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+    if not meta_uri:
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{meta_uri}/task", timeout=5.0)
+            task_arn = resp.json().get("TaskARN", "")
+            return task_arn.split("/")[-1] if task_arn else None
+    except Exception:
+        return None
 from app.jobs.manager import JobState, JobStatus, job_manager
 from app.models.run import RunSummary
 from app.query.service import search as _search_events
@@ -349,6 +371,19 @@ async def _run_job_task(job: JobState, db_pool, force: bool) -> None:
             await database.mark_job_running(job.job_id, job.started_at, db_pool)
         except Exception as exc:
             bound_log.warning(f"mark_job_running failed: {exc}")
+
+        # ── Register ECS task ID for CloudWatch log streaming ─────────────────
+        try:
+            ecs_task_id = await _get_ecs_task_id()
+            if ecs_task_id:
+                await db_pool.execute(
+                    "UPDATE kickflip_jobs SET ecs_task_id = $1 WHERE job_id = $2",
+                    ecs_task_id,
+                    job.job_id,
+                )
+                bound_log.info(f"Registered ECS task ID: {ecs_task_id}")
+        except Exception as exc:
+            bound_log.warning(f"Could not register ECS task ID: {exc}")
 
         # ── Batch lock ────────────────────────────────────────────────────────
         lock_acquired = False

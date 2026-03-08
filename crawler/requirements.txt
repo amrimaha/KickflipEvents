@@ -49,5 +49,8 @@ PyJWT>=2.8.0
 # Utilities
 urllib3>=2.2.0
 
+# AWS SDK — used by ECS entrypoint to upload logs to S3
+boto3>=1.34.0
+
 # File uploads — required by FastAPI for multipart/form-data (media upload endpoint)
 python-multipart>=0.0.9

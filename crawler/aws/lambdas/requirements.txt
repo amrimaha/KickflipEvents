@@ -1,0 +1,8 @@
+# Lambda dependencies
+# boto3 is pre-installed in the Lambda runtime — listed here only for local dev/testing.
+boto3>=1.34.0
+
+# Sync Postgres driver — simpler than asyncpg in Lambda (no event loop needed).
+# Use psycopg2-binary for Lambda zip deployments.
+# For container-based Lambda, use psycopg2 and install libpq-dev in the Dockerfile.
+psycopg2-binary>=2.9.9

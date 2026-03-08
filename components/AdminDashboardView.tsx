@@ -105,7 +105,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     if (apiBase) {
       try {
-        setSyncLog(prev => [...prev, '⟳ Triggering crawl job on Railway...']);
+        setSyncLog(prev => [...prev, '⟳ Triggering crawl job on AWS...']);
         const res = await fetch(`${apiBase}/api/crawl`, {
           method: 'POST',
           headers: {
