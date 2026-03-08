@@ -363,13 +363,13 @@ vibeTags (array), price, link (real URL).`,
   }];
 
   let finalText = '';
-  const MAX_TURNS = 6;
+  const MAX_TURNS = 3;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await anthropic.messages.create(
       {
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
         system: SYSTEM_PROMPT,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: conversationMessages,
