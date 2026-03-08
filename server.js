@@ -118,9 +118,21 @@ async function trackRequest({ endpoint, method = 'POST', userId = null, response
   }
 }
 
+// ─── Startup env check ───────────────────────────────────────────────
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ANTHROPIC_API_KEY', 'VOYAGE_API_KEY'];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error('[startup] MISSING ENV VARS:', missingEnv.join(', '));
+} else {
+  console.log('[startup] All required env vars present');
+  console.log('[startup] ANTHROPIC_API_KEY starts with:', process.env.ANTHROPIC_API_KEY?.slice(0, 10) + '...');
+  console.log('[startup] VOYAGE_API_KEY starts with:', process.env.VOYAGE_API_KEY?.slice(0, 10) + '...');
+  console.log('[startup] SUPABASE_URL:', process.env.SUPABASE_URL);
+}
+
 // ─── Health check ────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), missingEnv });
 });
 
 // ─── Google OAuth ────────────────────────────────────────────────────
@@ -419,13 +431,11 @@ async function storeDiscoveredEvents(events) {
         category: event.category || 'other',
         payload: event,
         embedding,
-        origin: 'crawl',
-        status: 'active',
+        origin: 'live_discovered',
         crawled_at: new Date().toISOString(),
         source_url: event.link || null,
         crawl_source: event.crawlSource || null,
         expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
     } catch (err) {
       console.warn(`Failed to store discovered event "${event.title}":`, err.message);
@@ -439,41 +449,47 @@ app.post('/api/chat', async (req, res) => {
   const { query, user_id } = req.body;
   if (!query) return res.status(400).json({ error: 'query is required' });
   const t0 = Date.now();
+  const reqId = Math.random().toString(36).slice(2, 8); // short ID to trace one request in logs
 
   const currentDateTime = new Date().toLocaleString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     hour: 'numeric', minute: 'numeric', timeZone: 'America/Los_Angeles',
   });
 
+  console.log(`[chat:${reqId}] START query="${query}"`);
+
   try {
     // ── ① Cache check ────────────────────────────────────────────────
+    console.log(`[chat:${reqId}] STEP 1 — checking cache`);
     const queryHash = hashQuery(query);
     const cached = await checkCache(queryHash);
 
     if (cached) {
-      console.log(`[cache HIT] "${query}"`);
+      console.log(`[chat:${reqId}] STEP 1 — cache HIT, returning cached result`);
       const events = await fetchEventsByIds(cached.event_ids);
       res.json({ text: cached.result_text, events, source: 'cache' });
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'cache' });
       return;
     }
 
-    console.log(`[cache MISS] "${query}" — running embedding search`);
+    console.log(`[chat:${reqId}] STEP 1 — cache MISS`);
 
     // ── ② Parse query constraints (date range, is_free, intent) ──────
+    console.log(`[chat:${reqId}] STEP 2 — parsing query constraints`);
     const constraints = parseQueryConstraints(query);
     const { intent, dateFrom, dateTo, isFree, dateLabel } = constraints;
-    if (dateLabel || isFree) {
-      console.log(`[parse] intent="${intent}" dateLabel=${dateLabel || 'none'} isFree=${isFree ?? 'any'}`);
-    }
+    console.log(`[chat:${reqId}] STEP 2 — intent="${intent}" dateLabel=${dateLabel || 'none'} isFree=${isFree ?? 'any'}`);
 
     // ── ③ Embed the intent (date/free phrases stripped) ───────────────
+    console.log(`[chat:${reqId}] STEP 3 — embedding query via Voyage AI`);
     let queryVector;
     try {
       queryVector = await embedQuery(intent);
+      console.log(`[chat:${reqId}] STEP 3 — embedding OK (${queryVector?.length} dims)`);
     } catch (embedErr) {
-      console.warn(`[embed] failed: ${embedErr.message} — falling back to chronological`);
+      console.warn(`[chat:${reqId}] STEP 3 — embedding FAILED: ${embedErr.message} — falling back to chronological`);
       const fallbackEvents = await searchChronological(constraints, 10);
+      console.log(`[chat:${reqId}] STEP 3 fallback — chronological returned ${fallbackEvents.length} events`);
       const result = fallbackEvents.length >= 1
         ? await formatWithClaude(query, fallbackEvents, currentDateTime)
         : await discoverWithWebSearch(query, currentDateTime);
@@ -485,42 +501,67 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // ── ④ pgvector similarity search with constraints ─────────────────
-    let matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, constraints);
-    console.log(`[pgvector] found ${matchedEvents.length} events above threshold`);
+    console.log(`[chat:${reqId}] STEP 4 — pgvector search (threshold=0.72)`);
+    let matchedEvents;
+    try {
+      matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, constraints);
+      console.log(`[chat:${reqId}] STEP 4 — pgvector returned ${matchedEvents.length} events`);
+    } catch (pgErr) {
+      console.error(`[chat:${reqId}] STEP 4 — pgvector FAILED: ${pgErr.message} — falling back to web search`);
+      // pgvector failure: fall through to web search instead of dying
+      matchedEvents = [];
+    }
 
     // ── ④a is_free retry: if 0 results with isFree filter → retry without ──
     let usedFreeRetry = false;
     if (matchedEvents.length === 0 && isFree !== undefined) {
-      console.log(`[pgvector] 0 results with is_free filter — retrying without it`);
-      matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, { dateFrom, dateTo });
-      usedFreeRetry = true;
+      console.log(`[chat:${reqId}] STEP 4a — retrying without is_free filter`);
+      try {
+        matchedEvents = await searchByEmbedding(queryVector, 0.72, 10, { dateFrom, dateTo });
+        usedFreeRetry = true;
+        console.log(`[chat:${reqId}] STEP 4a — retry returned ${matchedEvents.length} events`);
+      } catch (retryErr) {
+        console.error(`[chat:${reqId}] STEP 4a — retry also FAILED: ${retryErr.message}`);
+        matchedEvents = [];
+      }
     }
 
     let result;
 
     if (matchedEvents.length >= 3) {
       // ── ④b Good match — Claude formats top results ──────────────────
-      console.log(`[claude] formatting ${matchedEvents.length} pre-filtered events`);
+      console.log(`[chat:${reqId}] STEP 5 — formatWithClaude (${matchedEvents.length} events)`);
       result = await formatWithClaude(query, matchedEvents, currentDateTime);
+      console.log(`[chat:${reqId}] STEP 5 — formatWithClaude OK`);
 
     } else {
       // ── ④c Low confidence — try lower threshold ─────────────────────
-      const broadMatches = matchedEvents.length > 0
-        ? matchedEvents
-        : await searchByEmbedding(queryVector, 0.5, 6, { dateFrom, dateTo });
+      console.log(`[chat:${reqId}] STEP 5 — low match count (${matchedEvents.length}), trying broad threshold=0.5`);
+      let broadMatches = matchedEvents.length > 0 ? matchedEvents : [];
+      if (broadMatches.length === 0) {
+        try {
+          broadMatches = await searchByEmbedding(queryVector, 0.5, 6, { dateFrom, dateTo });
+          console.log(`[chat:${reqId}] STEP 5 — broad search returned ${broadMatches.length} events`);
+        } catch (broadErr) {
+          console.error(`[chat:${reqId}] STEP 5 — broad search FAILED: ${broadErr.message}`);
+          broadMatches = [];
+        }
+      }
 
       if (broadMatches.length >= 2) {
-        console.log(`[claude] broad match — formatting ${broadMatches.length} events`);
+        console.log(`[chat:${reqId}] STEP 5 — formatWithClaude broad match (${broadMatches.length} events)`);
         result = await formatWithClaude(query, broadMatches, currentDateTime);
+        console.log(`[chat:${reqId}] STEP 5 — formatWithClaude OK`);
       } else {
         // ── ④d Live web search fallback ───────────────────────────────
-        console.log(`[web_search] no DB match — triggering live search`);
+        console.log(`[chat:${reqId}] STEP 5 — no DB match, triggering web search`);
         result = await discoverWithWebSearch(query, currentDateTime);
+        console.log(`[chat:${reqId}] STEP 5 — web search returned ${result?.events?.length ?? 0} events`);
 
         // Store discovered events in background (non-blocking)
         if (result.events && result.events.length > 0) {
           storeDiscoveredEvents(result.events).catch(err =>
-            console.warn('Background store error:', err.message)
+            console.warn(`[chat:${reqId}] background store error (non-fatal):`, err.message)
           );
         }
       }
@@ -539,20 +580,25 @@ app.post('/api/chat', async (req, res) => {
     // ── Save to cache ─────────────────────────────────────────────────
     await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
 
+    const totalMs = Date.now() - t0;
+    console.log(`[chat:${reqId}] DONE — ${rawEvents.length} events, source=${responseSource}, ${totalMs}ms`);
+
     res.json({
       text: result.text || 'Checking the local scene...',
       events: rawEvents,
     });
-    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: responseSource });
+    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
 
   } catch (error) {
-    console.error('Chat endpoint error:', error);
+    const totalMs = Date.now() - t0;
+    console.error(`[chat:${reqId}] FATAL ERROR after ${totalMs}ms — ${error?.constructor?.name}: ${error?.message}`);
+    console.error(`[chat:${reqId}] Stack:`, error?.stack);
     res.status(500).json({
       error: 'AI service unavailable',
       text: 'Connection bumpy. Try again?',
       events: [],
     });
-    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 500, source: null });
+    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 500, source: null });
   }
 });
 
