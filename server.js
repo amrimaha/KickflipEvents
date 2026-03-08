@@ -22,7 +22,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { embedQuery, embedEvent } from './services/embeddingService.js';
 import { runCrawl } from './scripts/crawler.js';
-import { runSeed } from './scripts/seedEmbeddings.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -579,10 +578,12 @@ app.post('/api/crawl', async (req, res) => {
     let seedResult = null;
     if (summary.eventsStored > 0 && summary.embeddingsGenerated < summary.eventsStored) {
       console.log('[crawl] Some events missing embeddings — running seed backfill...');
-      seedResult = await runSeed().catch(err => {
-        console.warn('[crawl] Seed backfill failed (non-fatal):', err.message);
-        return null;
-      });
+      seedResult = await import('./scripts/seedEmbeddings.js')
+        .then(m => m.runSeed())
+        .catch(err => {
+          console.warn('[crawl] Seed backfill failed (non-fatal):', err.message);
+          return null;
+        });
     }
 
     return res.json({
@@ -606,7 +607,8 @@ app.post('/api/seed', async (req, res) => {
   }
 
   console.log('[seed] Embedding seed triggered');
-  runSeed()
+  import('./scripts/seedEmbeddings.js')
+    .then(m => m.runSeed())
     .then(result => console.log('[seed] Complete:', result))
     .catch(err => console.error('[seed] Failed:', err.message));
   return res.json({ status: 'Seed started', timestamp: new Date().toISOString() });
