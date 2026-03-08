@@ -331,9 +331,15 @@ export async function runCrawl({ batch: batchFilter } = {}) {
     };
   }
 
-  // Step 4: Generate embeddings
+  // Step 4: Generate embeddings (non-fatal — events stored with null embedding if this fails)
   console.log(`\n🧠 STEP 4: Generating Voyage AI embeddings for ${validEvents.length} events...`);
-  const vectors = await embedBatch(validEvents);
+  let vectors;
+  try {
+    vectors = await embedBatch(validEvents);
+  } catch (embedErr) {
+    console.warn(`  ⚠️  Embedding failed (${embedErr.message}) — storing events without embeddings. Run /api/seed to backfill.`);
+    vectors = new Array(validEvents.length).fill(null);
+  }
 
   // Step 5: Upsert
   console.log(`\n💾 STEP 5: Storing ${validEvents.length} events in Supabase...`);
@@ -371,6 +377,7 @@ export async function runCrawl({ batch: batchFilter } = {}) {
     eventsRejected: rejectedEvents.length,
     eventsFiltered: validEvents.length,
     eventsStored: stored,
+    embeddingsGenerated: vectors.filter(Boolean).length,
     duplicates,
     errors,
     firstError: firstError || null,
