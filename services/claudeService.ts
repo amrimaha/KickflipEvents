@@ -31,7 +31,6 @@ export const searchSeattleEvents = async (
 
     const data = await fetchWithRetry(`${API_URL}/api/chat`, {
       query,
-      events: registrySource,
     });
 
     const rawEvents: KickflipEvent[] = (data.events || []).map((e: any, index: number) => {
