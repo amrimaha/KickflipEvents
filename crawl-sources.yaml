@@ -26,6 +26,28 @@ settings:
 
 sources:
 
+  # ── Batch: aggregators  (Tier 1 — high signal density, check daily) ────────
+  - name: EverOut Seattle
+    domain: everout.com
+    category: all
+    batch: aggregators
+    enabled: true
+    priority: 1
+
+  - name: Do206
+    domain: do206.com
+    category: music,art,comedy
+    batch: aggregators
+    enabled: true
+    priority: 1
+
+  - name: Visit Seattle
+    domain: visitseattle.org
+    category: all
+    batch: aggregators
+    enabled: true
+    priority: 1
+
   # ── Batch: ticketing  (highest event density) ─────────────────────────────
   - name: Eventbrite Seattle
     domain: eventbrite.com
@@ -99,31 +121,54 @@ sources:
     enabled: true
     priority: 3
 
-  # ── Batch: extra  (disabled by default — enable when ready) ───────────────
   - name: Showbox Seattle
     domain: showboxpresents.com
     category: music
-    batch: extra
-    enabled: false
+    batch: venues
+    enabled: true
+    priority: 3
+
+  - name: STG Presents
+    domain: stgpresents.org
+    category: music,art
+    batch: venues
+    enabled: true
+    priority: 3
+    # Covers Neptune, Paramount, Moore Theatre
+
+  - name: The Vera Project
+    domain: theveraproject.org
+    category: music
+    batch: venues
+    enabled: true
+    priority: 3
+
+  # ── Batch: culture  (arts & museums — weekly crawl sufficient) ─────────────
+  - name: Seattle Art Museum
+    domain: seattleartmuseum.org
+    category: art
+    batch: culture
+    enabled: true
     priority: 4
 
+  - name: Nordic Museum
+    domain: nordicmuseum.org
+    category: art
+    batch: culture
+    enabled: true
+    priority: 4
+
+  - name: Pioneer Square
+    domain: pioneersquare.org
+    category: art
+    batch: culture
+    enabled: true
+    priority: 4
+
+  # ── Batch: extra  (disabled — high noise or API-gated) ────────────────────
   - name: Ticketmaster Seattle
     domain: ticketmaster.com
     category: all
     batch: extra
     enabled: false
-    priority: 4
-
-  - name: Moore Theatre
-    domain: stgpresents.org
-    category: music,art
-    batch: extra
-    enabled: false
-    priority: 4
-
-  - name: Paramount Theatre
-    domain: stgpresents.org
-    category: music,art
-    batch: extra
-    enabled: false
-    priority: 4
+    priority: 5
