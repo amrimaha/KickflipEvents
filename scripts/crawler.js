@@ -121,13 +121,13 @@ async function searchWithClaude(search) {
 
   const conversationMessages = [{ role: 'user', content: search.prompt }];
   let finalText = '';
-  const MAX_TURNS = 8;
+  const MAX_TURNS = 4;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await anthropic.messages.create(
       {
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4096,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: conversationMessages,
       },
