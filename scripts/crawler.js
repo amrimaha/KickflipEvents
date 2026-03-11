@@ -124,6 +124,7 @@ async function searchWithClaude(search) {
   const MAX_TURNS = 4;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    console.log(`  [turn ${turn + 1}] calling Claude...`);
     const response = await anthropic.messages.create(
       {
         model: 'claude-haiku-4-5-20251001',
@@ -134,8 +135,14 @@ async function searchWithClaude(search) {
       { headers: { 'anthropic-beta': 'web-search-2025-03-05' } }
     );
 
+    const blockTypes = response.content.map(b => b.type).join(', ');
+    console.log(`  [turn ${turn + 1}] stop_reason=${response.stop_reason} blocks=[${blockTypes}]`);
+
     const textBlocks = response.content.filter(b => b.type === 'text');
     if (textBlocks.length > 0) finalText = textBlocks.map(b => b.text).join('');
+
+    console.log(`  [turn ${turn + 1}] finalText length=${finalText.length} preview="${finalText.slice(0, 120).replace(/\n/g, ' ')}"`);
+
     if (response.stop_reason === 'end_turn') break;
 
     if (response.stop_reason === 'tool_use') {
@@ -159,7 +166,7 @@ async function searchWithClaude(search) {
 
   const jsonMatch = finalText.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
-    console.warn(`  ⚠️  No JSON array in response for "${search.name}"`);
+    console.warn(`  ⚠️  No JSON array in response for "${search.name}". Full text: "${finalText.slice(0, 300)}"`);
     return [];
   }
   try {
