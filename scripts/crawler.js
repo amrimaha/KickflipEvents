@@ -1,11 +1,28 @@
 /**
- * crawler.js
- * Daily batch crawler — uses Claude web_search to find real Seattle events.
+ * crawler.js — v2 (tiered, rate-limit-safe)
  *
- * Configuration: edit crawl-sources.yaml at the repo root to control which
- * sites are searched, the date window, and batch size.
+ * Architecture (learnings from Bryce's kickflip-engine):
  *
- * Run on demand: POST /api/crawl  Authorization: Bearer <CRON_SECRET>
+ * Tier 1 — RSS feeds (zero Claude cost)
+ *   Directly fetch structured feeds. Fast, free, reliable. Most aggregators
+ *   (EverOut, The Stranger) publish RSS. ~0 API tokens.
+ *
+ * Tier 2 — HTML scrape + Claude extract (cheap, no web_search)
+ *   fetch() the venue/aggregator page → strip noise with cheerio → single
+ *   Claude Haiku call to extract JSON (no web_search tool, no multi-turn loop).
+ *   ~2–4K input tokens per source. 10× cheaper than the old approach.
+ *
+ * Tier 3 — AI gap-fill (targeted, single-turn web_search)
+ *   Only runs when a category has < min_gap_fill events after Tiers 1+2.
+ *   Single Claude Haiku call with web_search tool — no looping, take the
+ *   LAST text block (Bryce's pattern). 35s cooldown between calls.
+ *   Claude is used as a discovery fallback, not the primary crawler.
+ *
+ * Quality pipeline (after all tiers):
+ *   normalize → quality gate → deduplicate → embed → upsert
+ *
+ * Configuration: crawl-sources.yaml — each source now has scrape_method
+ *   (rss | html | disabled) and url (the actual page URL, not just domain).
  */
 
 import 'dotenv/config';
@@ -16,26 +33,21 @@ import yaml from 'js-yaml';
 import { jsonrepair } from 'jsonrepair';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import RssParser from 'rss-parser';
+import * as cheerio from 'cheerio';
 import { embedBatch } from '../services/embeddingService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ─── Load config from crawl-sources.yaml ─────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 function loadConfig() {
   const configPath = resolve(__dirname, '../crawl-sources.yaml');
   try {
-    const raw = readFileSync(configPath, 'utf8');
-    return yaml.load(raw);
+    return yaml.load(readFileSync(configPath, 'utf8'));
   } catch (err) {
-    console.warn('[crawler] Could not read crawl-sources.yaml, using defaults:', err.message);
-    return {
-      settings: { date_window_days: 14, batch_size: 3, max_sources_per_run: 10 },
-      sources: [
-        { name: 'Eventbrite Seattle', domain: 'eventbrite.com', category: 'all', enabled: true, priority: 1 },
-        { name: 'The Stranger',       domain: 'thestranger.com', category: 'music,art,comedy', enabled: true, priority: 2 },
-      ],
-    };
+    console.warn('[crawler] Could not read crawl-sources.yaml:', err.message);
+    return { settings: {}, sources: [] };
   }
 }
 
@@ -43,8 +55,31 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const rssParser = new RssParser();
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const VALID_CATEGORIES = new Set([
+  'music', 'art', 'food', 'outdoor', 'comedy', 'wellness', 'sports', 'party', 'other',
+]);
+
+// Categories checked for gap-fill (AI will search for these if coverage is thin)
+const GAP_FILL_CATEGORIES = [
+  { key: 'music',    label: 'Music & Nightlife concerts shows' },
+  { key: 'art',      label: 'Arts & Culture gallery openings performances' },
+  { key: 'food',     label: 'Food, Drink & Culinary events classes' },
+  { key: 'outdoor',  label: 'Outdoor & Adventure activities' },
+  { key: 'comedy',   label: 'Comedy shows open mics stand-up' },
+  { key: 'wellness', label: 'Fitness & Wellness yoga classes workshops' },
+];
+
+const BLOCKLIST = [
+  'mlm', 'network marketing', 'pyramid scheme', 'get rich',
+  'passive income', 'multi-level', 'downline',
+];
+
+const SLEEP = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -56,151 +91,257 @@ function getWindowBounds(windowDays) {
   return { windowStart: now, windowEnd: end };
 }
 
-function formatDate(d) {
+function formatDatePretty(d) {
   return d.toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     timeZone: 'America/Los_Angeles',
   });
 }
 
-function isWithinWindow(event, windowStart, windowEnd) {
-  if (!event.startDate || event.startDate === 'See Website') {
-    return { valid: true, reason: 'undated' };
-  }
-  const d = new Date(event.startDate);
-  if (isNaN(d.getTime())) return { valid: true, reason: 'unparseable' };
-  if (d < windowStart) return { valid: false, reason: `past (${event.startDate})` };
-  if (d > windowEnd)   return { valid: false, reason: `beyond window (${event.startDate})` };
-  return { valid: true, reason: 'in-window' };
+function toISO(d) {
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 }
 
-// ─── Build search prompt for a batch of sources ───────────────────────────────
+// ─── Quality gate (Bryce-inspired) ───────────────────────────────────────────
 
-function buildBatchPrompt(sources, todayStr, windowEndStr) {
-  const siteNames = sources.map(s => s.name).join(', ');
-  const domainList = sources.map(s => s.domain).join(', ');
+function qualityGate(event, windowStart, windowEnd) {
+  if (!event.title || event.title.trim().length < 5) {
+    return { pass: false, reason: 'title too short' };
+  }
+  if (!event.link || !event.link.startsWith('http')) {
+    return { pass: false, reason: 'no valid URL' };
+  }
+  const desc = event.description || '';
+  if (desc.trim().length > 0 && desc.trim().length < 15) {
+    return { pass: false, reason: 'description too short' };
+  }
 
+  if (event.startDate && event.startDate !== 'See Website') {
+    const d = new Date(event.startDate);
+    if (!isNaN(d.getTime())) {
+      if (d < windowStart) return { pass: false, reason: `past (${event.startDate})` };
+      if (d > windowEnd)   return { pass: false, reason: `beyond window (${event.startDate})` };
+    }
+  }
+
+  const text = `${event.title} ${event.description ?? ''}`.toLowerCase();
+  for (const word of BLOCKLIST) {
+    if (text.includes(word)) return { pass: false, reason: `blocked keyword: "${word}"` };
+  }
+  return { pass: true, reason: 'ok' };
+}
+
+// ─── Deduplication ────────────────────────────────────────────────────────────
+
+function makeDedupKey(event) {
+  const title = (event.title || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '').slice(0, 50);
+  const date  = event.startDate || '';
+  return `${title}__${date}`;
+}
+
+// ─── Normalize event fields ───────────────────────────────────────────────────
+
+function normalizeEvent(raw, sourceName) {
+  const cat = (raw.category || 'other').split(',')[0].trim().toLowerCase();
   return {
-    name: siteNames,
-    prompt: `Search for real upcoming Seattle events from ${todayStr} through ${windowEndStr}.
-
-Search these specific websites for event listings: ${domainList}
-
-For each site, search for "Seattle events" or browse their event calendar pages directly.
-
-Return a JSON array of ALL events you find:
-[{
-  "id": "crawl-<slugified-title>-<YYYYMMDD>",
-  "title": "Event Title",
-  "date": "Sat, Mar 1 2026",
-  "startDate": "2026-03-01",
-  "startTime": "8:00 PM",
-  "location": "Venue Name, Seattle WA",
-  "description": "2-3 sentences about the event vibe and what to expect",
-  "category": "music",
-  "vibeTags": ["#live", "#indie"],
-  "price": "$25",
-  "link": "https://real-event-url.com",
-  "organizer": "Organizer Name",
-  "origin": "crawl",
-  "crawlSource": "${siteNames}"
-}]
-
-Rules:
-- Only include events dated from ${todayStr} to ${windowEndStr}
-- Use real URLs from your search results — not example.com
-- category must be one of: music, art, food, outdoor, comedy, wellness, sports, party, other
-- Return ONLY the JSON array, no markdown, no explanation`,
+    title:       (raw.title || 'Untitled').trim().slice(0, 200),
+    date:        raw.date || raw.startDate || null,
+    startDate:   raw.startDate || null,
+    startTime:   raw.startTime || null,
+    location:    raw.location || null,
+    description: (raw.description || '').slice(0, 500),
+    category:    VALID_CATEGORIES.has(cat) ? cat : 'other',
+    vibeTags:    raw.vibeTags || [],
+    price:       raw.price || null,
+    link:        raw.link || raw.source_url || null,
+    organizer:   raw.organizer || null,
+    origin:      'crawl',
+    crawlSource: sourceName,
+    imageUrl:    raw.imageUrl || raw.image_url || null,
   };
 }
 
-// ─── Run one Claude web_search call ───────────────────────────────────────────
+// ─── Tier 1: RSS ──────────────────────────────────────────────────────────────
 
-async function searchWithClaude(search) {
-  console.log(`\n  🔍 Searching: "${search.name}"...`);
+async function scrapeRss(source) {
+  console.log(`  📡 [rss] ${source.name}...`);
+  try {
+    const feed = await rssParser.parseURL(source.url);
+    const events = (feed.items ?? []).map(item => normalizeEvent({
+      title:       item.title,
+      startDate:   item.isoDate ? item.isoDate.slice(0, 10) : null,
+      date:        item.pubDate || item.isoDate,
+      link:        item.link,
+      description: item.contentSnippet || item.content || '',
+      category:    (item.categories ?? [source.category ?? 'other'])[0],
+      location:    '',
+      price:       null,
+    }, source.name));
+    console.log(`  ✅ [rss] ${source.name}: ${events.length} items`);
+    return events;
+  } catch (err) {
+    console.warn(`  ⚠️  [rss] ${source.name} failed: ${err.message}`);
+    return [];
+  }
+}
 
-  const conversationMessages = [{ role: 'user', content: search.prompt }];
-  let finalText = '';
-  const MAX_TURNS = 8;
+// ─── Tier 2: HTML fetch + Claude extract ─────────────────────────────────────
+//
+// Deliberately does NOT use web_search_20250305.
+// Fetches real HTML → strips noise → single Haiku call to extract events.
+// ~2–4K input tokens. No looping. No rate-limit risk.
 
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    console.log(`  [turn ${turn + 1}] calling Claude...`);
+async function scrapeHtml(source) {
+  console.log(`  🌐 [html] ${source.name}...`);
+
+  let html = null;
+  try {
+    const res = await fetch(source.url, {
+      headers: {
+        'User-Agent': 'KickflipBot/2.0 (+https://kickflip-events.vercel.app)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    html = await res.text();
+  } catch (err) {
+    console.warn(`  ⚠️  [html] ${source.name} fetch failed: ${err.message}`);
+    return [];
+  }
+
+  // Strip noise, keep first 10KB of meaningful text
+  const $ = cheerio.load(html);
+  $('script, style, nav, footer, noscript, iframe, [aria-hidden="true"]').remove();
+  const bodyText = ($('main, [class*="event"], [id*="event"], article').first().text()
+    || $('body').text())
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 10000);
+
+  if (bodyText.length < 80) {
+    console.warn(`  ⚠️  [html] ${source.name}: page too short to parse`);
+    return [];
+  }
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: `Extract upcoming Seattle events from this page text.
+Output ONLY a valid JSON array — no markdown, no explanation.
+Schema (use null for unknown fields):
+[{"title":"string","startDate":"YYYY-MM-DD","startTime":"HH:MM AM/PM","location":"Venue, Seattle WA","description":"string","category":"music|art|food|outdoor|comedy|wellness|sports|party|other","price":"$N or Free","link":"https://real-url"}]
+If no events, return [].
+
+Page URL: ${source.url}
+Text: ${bodyText}`,
+      }],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    // Strip optional markdown code fence
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) {
+      console.warn(`  ⚠️  [html] ${source.name}: no JSON array in response`);
+      return [];
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      parsed = JSON.parse(jsonrepair(match[0]));
+    }
+    if (!Array.isArray(parsed)) return [];
+
+    const events = parsed.map(e => normalizeEvent({
+      ...e,
+      link: e.link?.startsWith('http') ? e.link : source.url,
+    }, source.name));
+    console.log(`  ✅ [html] ${source.name}: ${events.length} events`);
+    return events;
+  } catch (err) {
+    console.warn(`  ⚠️  [html] ${source.name} Claude extract failed: ${err.message}`);
+    return [];
+  }
+}
+
+// ─── Tier 3: AI gap-fill (single-turn web_search) ────────────────────────────
+//
+// Based directly on Bryce's discovery.ts approach:
+// - Single message, web_search tool enabled
+// - Take the LAST text block (intermediate blocks are search thoughts, not answers)
+// - Parse ```json block first, fall back to bare array
+// - Only called when category coverage is thin
+
+async function aiGapFill(catKey, catLabel, todayStr, windowEndStr) {
+  console.log(`  🤖 [gap-fill] category="${catKey}"...`);
+  try {
     const response = await anthropic.messages.create(
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
+        max_tokens: 2048,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: conversationMessages,
+        messages: [{
+          role: 'user',
+          content: `Find ${catLabel} events in Seattle, WA from ${todayStr} to ${windowEndStr}.
+Search sites like everout.com, thestranger.com, eventbrite.com, ra.co, do206.com.
+Only include events with a real URL and approximate date.
+
+At the end output a JSON array in a code block:
+\`\`\`json
+[{
+  "title": "string",
+  "startDate": "YYYY-MM-DD",
+  "startTime": "HH:MM AM/PM or null",
+  "location": "Venue name, neighborhood",
+  "description": "What makes this event interesting (30+ chars)",
+  "category": "${catKey}",
+  "price": "$N or Free or null",
+  "link": "https://real-event-url.com"
+}]
+\`\`\`
+Return [] if nothing found. Only real events with real URLs.`,
+        }],
       },
       { headers: { 'anthropic-beta': 'web-search-2025-03-05' } }
     );
 
-    const blockTypes = response.content.map(b => b.type).join(', ');
-    console.log(`  [turn ${turn + 1}] stop_reason=${response.stop_reason} blocks=[${blockTypes}]`);
-
+    // Take the LAST text block — intermediate ones are just "I'll search for..."
     const textBlocks = response.content.filter(b => b.type === 'text');
-    if (textBlocks.length > 0) finalText = textBlocks.map(b => b.text).join('');
+    const lastText = textBlocks[textBlocks.length - 1]?.text ?? '';
 
-    console.log(`  [turn ${turn + 1}] finalText length=${finalText.length} preview="${finalText.slice(0, 120).replace(/\n/g, ' ')}"`);
+    // Prefer ```json block, fall back to bare array
+    const codeMatch = lastText.match(/```json\s*([\s\S]*?)```/i);
+    const bareMatch = lastText.match(/\[[\s\S]*\]/);
+    const jsonStr = codeMatch?.[1]?.trim() ?? bareMatch?.[0];
 
-    if (response.stop_reason === 'end_turn') break;
-
-    if (response.stop_reason === 'tool_use') {
-      conversationMessages.push({ role: 'assistant', content: response.content });
-      // For the built-in web_search tool, results are already embedded in the
-      // assistant message (web_search_tool_result_20250305 blocks). DO NOT
-      // resend the full result content — that doubles the token count and blows
-      // through the 50K/min input rate limit. Just ACK each tool_use call.
-      const toolResults = response.content
-        .filter(b => b.type === 'tool_use')
-        .map(b => ({
-          type: 'tool_result',
-          tool_use_id: b.id,
-          content: 'Search complete.',
-        }));
-      if (toolResults.length > 0) {
-        conversationMessages.push({ role: 'user', content: toolResults });
-        // On the penultimate turn, nudge Claude to stop searching and output JSON
-        if (turn === MAX_TURNS - 2) {
-          conversationMessages.push({ role: 'user', content: 'Good, now compile all events you found into the JSON array. Output ONLY the JSON array, nothing else.' });
-        }
-      } else break;
-    } else break;
-  }
-
-  const jsonMatch = finalText.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    console.warn(`  ⚠️  No JSON array in response for "${search.name}". Full text: "${finalText.slice(0, 300)}"`);
-    return [];
-  }
-  try {
-    const events = JSON.parse(jsonMatch[0]);
-    console.log(`  ✅ "${search.name}": ${events.length} events found`);
-    return events;
-  } catch (err) {
-    console.warn(`  ⚠️  JSON parse failed, attempting repair for "${search.name}": ${err.message}`);
-    try {
-      const repaired = jsonrepair(jsonMatch[0]);
-      const events = JSON.parse(repaired);
-      console.log(`  ✅ "${search.name}": ${events.length} events found (after repair)`);
-      return events;
-    } catch (repairErr) {
-      console.warn(`  ❌  Repair also failed for "${search.name}": ${repairErr.message}`);
+    if (!jsonStr) {
+      console.warn(`  ⚠️  [gap-fill] "${catKey}": no JSON. Preview: "${lastText.slice(0, 150)}"`);
       return [];
     }
+
+    let events;
+    try {
+      events = JSON.parse(jsonStr);
+    } catch {
+      events = JSON.parse(jsonrepair(jsonStr));
+    }
+    if (!Array.isArray(events)) return [];
+
+    const tagged = events
+      .filter(e => e.link?.startsWith('http')) // require real URL
+      .map(e => normalizeEvent({ ...e, category: catKey }, `ai_gap_fill:${catKey}`));
+    console.log(`  ✅ [gap-fill] "${catKey}": ${tagged.length} events`);
+    return tagged;
+  } catch (err) {
+    console.warn(`  ⚠️  [gap-fill] "${catKey}" failed: ${err.message.slice(0, 120)}`);
+    return [];
   }
-}
-
-// ─── Deduplicate by title + date ──────────────────────────────────────────────
-
-function deduplicate(events) {
-  const seen = new Map();
-  return events.filter(event => {
-    const key = `${(event.title || '').toLowerCase().trim()}__${event.startDate || ''}`;
-    if (seen.has(key)) return false;
-    seen.set(key, true);
-    return true;
-  });
 }
 
 // ─── Upsert with embeddings ───────────────────────────────────────────────────
@@ -209,13 +350,12 @@ async function upsertEvents(events, vectors, windowEnd) {
   const expiresAt = new Date(windowEnd);
   expiresAt.setDate(expiresAt.getDate() + 1);
 
-  let stored = 0, duplicates = 0, errors = 0;
+  let stored = 0, skipped = 0, errors = 0;
   const storedTitles = [];
   let firstError = null;
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
-    const embedding = vectors[i];
 
     if (!event.id) {
       const slug = (event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
@@ -224,17 +364,17 @@ async function upsertEvents(events, vectors, windowEnd) {
     }
 
     const row = {
-      id:          event.id,
-      title:       event.title || 'Untitled Event',
-      category:    event.category || 'other',
-      payload:     event,
-      embedding,
-      origin:      'crawl',
-      is_active:   true,
-      crawled_at:  new Date().toISOString(),
-      source_url:  event.link || null,
+      id:           event.id,
+      title:        event.title,
+      category:     event.category,
+      payload:      event,
+      embedding:    vectors[i] ?? null,
+      origin:       'crawl',
+      is_active:    true,
+      crawled_at:   new Date().toISOString(),
+      source_url:   event.link || null,
       crawl_source: event.crawlSource || null,
-      expires_at:  expiresAt.toISOString(),
+      expires_at:   expiresAt.toISOString(),
     };
 
     const { error } = await supabase
@@ -243,164 +383,204 @@ async function upsertEvents(events, vectors, windowEnd) {
 
     if (error) {
       if (error.code === '23505') {
-        duplicates++;
+        skipped++;
       } else {
-        console.error(`  ❌ "${event.title}": ${error.message} (code: ${error.code})`);
         if (!firstError) firstError = `${error.message} (code: ${error.code})`;
+        console.error(`  ❌ "${event.title}": ${error.message}`);
         errors++;
       }
     } else {
       stored++;
-      storedTitles.push(`  • ${event.title} (${event.date || event.startDate || 'undated'}) — ${event.category}`);
+      storedTitles.push(`  • ${event.title} (${event.startDate || 'undated'}) — ${event.category}`);
     }
   }
 
-  return { stored, duplicates, errors, storedTitles, firstError };
+  return { stored, skipped, errors, storedTitles, firstError };
 }
 
 // ─── Main crawl ───────────────────────────────────────────────────────────────
 
 /**
- * @param {object} opts
- * @param {string} [opts.batch]  — if set, only run sources with this batch label
- *                                 e.g. "ticketing" | "media" | "venues" | "extra"
- *                                 omit to run all enabled sources
+ * @param {object}  opts
+ * @param {string}  [opts.batch]     — only run sources with this batch label
+ * @param {boolean} [opts.skipGapFill] — skip Tier 3 AI gap-fill (for quick runs)
  */
-export async function runCrawl({ batch: batchFilter } = {}) {
+export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {}) {
   const startTime = Date.now();
 
-  // Load config fresh on each run (picks up YAML edits without restart)
   const config = loadConfig();
-  const { date_window_days = 14, batch_size = 3, max_sources_per_run = 10 } = config.settings || {};
-
-  // Filter to enabled sources, optionally by batch label, sort by priority, cap
-  const enabledSources = (config.sources || [])
-    .filter(s => s.enabled !== false)
-    .filter(s => !batchFilter || s.batch === batchFilter)
-    .sort((a, b) => (a.priority || 99) - (b.priority || 99))
-    .slice(0, max_sources_per_run);
+  const {
+    date_window_days = 14,
+    min_gap_fill     = 5,     // Run AI gap-fill if category has fewer than this many events
+    max_html_sources = 15,    // Cap HTML sources (each costs ~1 Claude call)
+    gap_fill_delay_ms = 35000, // 35s between gap-fill calls (rate limit safety)
+  } = config.settings || {};
 
   const { windowStart, windowEnd } = getWindowBounds(date_window_days);
-  const todayStr     = formatDate(windowStart);
-  const windowEndStr = formatDate(windowEnd);
+  const todayStr    = formatDatePretty(windowStart);
+  const windowEndStr = formatDatePretty(windowEnd);
 
-  console.log('\n╔══════════════════════════════════════════════╗');
-  console.log('║          Kickflip Event Crawler              ║');
-  console.log(`║  Window : ${todayStr.slice(0,10)} → ${windowEndStr.slice(0,10)} (${date_window_days}d)   ║`);
-  console.log(`║  Filter : batch=${batchFilter || 'all'}                    ║`);
-  console.log(`║  Sources: ${enabledSources.length} enabled (cap: ${max_sources_per_run})              ║`);
-  console.log(`║  Batches: ${batch_size} sources/call                      ║`);
-  console.log('╚══════════════════════════════════════════════╝');
-  console.log('\nEnabled sources:');
-  enabledSources.forEach(s => console.log(`  [${s.priority}] ${s.name} (${s.domain})`));
+  const allSources = (config.sources || [])
+    .filter(s => s.enabled !== false)
+    .filter(s => !batchFilter || s.batch === batchFilter)
+    .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
-  // Batch sources into groups of batch_size
-  const batches = [];
-  for (let i = 0; i < enabledSources.length; i += batch_size) {
-    batches.push(enabledSources.slice(i, i + batch_size));
-  }
+  const rssSources  = allSources.filter(s => s.scrape_method === 'rss');
+  const htmlSources = allSources.filter(s => s.scrape_method === 'html').slice(0, max_html_sources);
 
-  // Step 1: Run searches
-  console.log(`\n🔍 STEP 1: Running ${batches.length} search batch(es)...`);
+  console.log('\n╔════════════════════════════════════════════════╗');
+  console.log('║     Kickflip Crawler v2 — Tiered Pipeline     ║');
+  console.log(`║  Window : ${toISO(windowStart)} → ${toISO(windowEnd)} (${date_window_days}d)     ║`);
+  console.log(`║  Tier 1 : ${rssSources.length} RSS sources (free, zero Claude)       ║`);
+  console.log(`║  Tier 2 : ${htmlSources.length} HTML sources (~2-4K tokens each)    ║`);
+  console.log(`║  Tier 3 : AI gap-fill if category < ${min_gap_fill} events           ║`);
+  console.log('╚════════════════════════════════════════════════╝');
+
   let allCandidates = [];
 
-  for (let i = 0; i < batches.length; i++) {
-    if (i > 0) {
-      // Spread calls across time to stay under Haiku's 50K input tokens/min limit.
-      // Each multi-turn web search conversation can be 10–20K tokens.
-      console.log(`  ⏳ Waiting 15s before next batch (rate limit spacing)...`);
-      await new Promise(r => setTimeout(r, 15_000));
-    }
-    const search = buildBatchPrompt(batches[i], todayStr, windowEndStr);
-    const results = await searchWithClaude(search);
-    allCandidates.push(...results);
+  // ── Tier 1: RSS (free) ────────────────────────────────────────────────────
+  console.log(`\n📡 TIER 1: RSS feeds (${rssSources.length} sources, $0 cost)...`);
+  for (const src of rssSources) {
+    const events = await scrapeRss(src);
+    allCandidates.push(...events);
   }
+  console.log(`  → ${allCandidates.length} candidates from RSS`);
 
-  console.log(`\n  → Total candidates: ${allCandidates.length}`);
+  // ── Tier 2: HTML + Claude extract (cheap) ────────────────────────────────
+  console.log(`\n🌐 TIER 2: HTML scrape + Claude extract (${htmlSources.length} sources)...`);
+  for (let i = 0; i < htmlSources.length; i++) {
+    const events = await scrapeHtml(htmlSources[i]);
+    allCandidates.push(...events);
+    // Small courtesy delay between HTML+Claude calls (~2-4K tokens each, well under limit)
+    if (i < htmlSources.length - 1) await SLEEP(1500);
+  }
+  console.log(`  → ${allCandidates.length} total candidates after HTML`);
 
-  // Step 2: Deduplicate
-  console.log('\n🔄 STEP 2: Deduplicating...');
-  const unique = deduplicate(allCandidates);
+  // ── Normalize + Deduplicate ────────────────────────────────────────────────
+  console.log('\n🔄 NORMALIZE + DEDUPLICATE...');
+  const seen = new Map();
+  const unique = allCandidates.filter(e => {
+    const key = makeDedupKey(e);
+    if (seen.has(key)) return false;
+    seen.set(key, true);
+    return true;
+  });
   console.log(`  → ${unique.length} unique (removed ${allCandidates.length - unique.length} duplicates)`);
 
-  // Step 3: Filter to window
-  console.log('\n🗓️  STEP 3: Filtering to date window...');
-  const validEvents = [];
-  const rejectedEvents = [];
+  // ── Quality gate ──────────────────────────────────────────────────────────
+  console.log('\n✅ QUALITY GATE...');
+  const valid = [];
+  const rejected = [];
+  for (const e of unique) {
+    const { pass, reason } = qualityGate(e, windowStart, windowEnd);
+    if (pass) valid.push(e);
+    else rejected.push(`  ✗ "${e.title}" — ${reason}`);
+  }
+  console.log(`  → ${valid.length} pass, ${rejected.length} rejected`);
+  if (rejected.length > 0 && rejected.length <= 10) {
+    rejected.forEach(r => console.log(r));
+  }
 
-  for (const event of unique) {
-    const { valid, reason } = isWithinWindow(event, windowStart, windowEnd);
-    if (valid) {
-      validEvents.push(event);
+  // ── Tier 3: AI gap-fill (targeted, single-turn) ───────────────────────────
+  let gapFillRuns = 0;
+  if (!skipGapFill) {
+    const categoryCount = {};
+    for (const e of valid) {
+      const cat = e.category || 'other';
+      categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+    }
+
+    const gapCategories = GAP_FILL_CATEGORIES.filter(
+      c => (categoryCount[c.key] || 0) < min_gap_fill
+    );
+
+    if (gapCategories.length === 0) {
+      console.log('\n🤖 TIER 3: All categories covered — skipping AI gap-fill');
     } else {
-      rejectedEvents.push(`  ✗ "${event.title}" — ${reason}`);
+      console.log(`\n🤖 TIER 3: AI gap-fill for ${gapCategories.length} thin categories...`);
+      console.log(`  Coverage: ${JSON.stringify(categoryCount)}`);
+
+      for (let i = 0; i < gapCategories.length; i++) {
+        if (i > 0) {
+          console.log(`  ⏳ ${gap_fill_delay_ms / 1000}s cooldown between gap-fill calls...`);
+          await SLEEP(gap_fill_delay_ms);
+        }
+        const { key, label } = gapCategories[i];
+        const gapEvents = await aiGapFill(key, label, todayStr, windowEndStr);
+        for (const e of gapEvents) {
+          const { pass } = qualityGate(e, windowStart, windowEnd);
+          if (pass && !seen.has(makeDedupKey(e))) {
+            seen.set(makeDedupKey(e), true);
+            valid.push(e);
+          }
+        }
+        gapFillRuns++;
+      }
+      console.log(`  → ${valid.length} total events after gap-fill`);
     }
   }
 
-  console.log(`  → ${validEvents.length} pass filter, ${rejectedEvents.length} rejected`);
-
-  if (validEvents.length === 0) {
+  if (valid.length === 0) {
     console.log('\n⚠️  No valid events to store.');
     return {
-      eventsFound: allCandidates.length, eventsRejected: rejectedEvents.length,
-      eventsFiltered: 0, eventsStored: 0, duplicates: 0, errors: 0,
-      sourcesRun: enabledSources.length, durationMs: Date.now() - startTime,
+      eventsFound: allCandidates.length, eventsStored: 0,
+      durationMs: Date.now() - startTime,
     };
   }
 
-  // Step 4: Generate embeddings (non-fatal — events stored with null embedding if this fails)
-  console.log(`\n🧠 STEP 4: Generating Voyage AI embeddings for ${validEvents.length} events...`);
+  // ── Embeddings ────────────────────────────────────────────────────────────
+  console.log(`\n🧠 EMBEDDINGS: ${valid.length} events...`);
   let vectors;
   try {
-    vectors = await embedBatch(validEvents);
+    vectors = await embedBatch(valid);
   } catch (embedErr) {
-    console.warn(`  ⚠️  Embedding failed (${embedErr.message}) — storing events without embeddings. Run /api/seed to backfill.`);
-    vectors = new Array(validEvents.length).fill(null);
+    console.warn(`  ⚠️  Embedding failed (${embedErr.message}) — storing without embeddings`);
+    vectors = new Array(valid.length).fill(null);
   }
 
-  // Step 5: Upsert
-  console.log(`\n💾 STEP 5: Storing ${validEvents.length} events in Supabase...`);
-  const { stored, duplicates, errors, storedTitles, firstError } = await upsertEvents(validEvents, vectors, windowEnd);
+  // ── Upsert ────────────────────────────────────────────────────────────────
+  console.log(`\n💾 UPSERT: ${valid.length} events to Supabase...`);
+  const { stored, skipped, errors, storedTitles, firstError } =
+    await upsertEvents(valid, vectors, windowEnd);
 
-  // Step 6: Clean expired cache
-  console.log('\n🧹 STEP 6: Cleaning expired query cache...');
-  const { error: cleanupErr } = await supabase.rpc('cleanup_expired_cache');
-  if (cleanupErr) console.warn('  ⚠️  Cache cleanup:', cleanupErr.message);
+  // ── Cache cleanup ─────────────────────────────────────────────────────────
+  console.log('\n🧹 Cache cleanup...');
+  const { error: cacheErr } = await supabase.rpc('cleanup_expired_cache');
+  if (cacheErr) console.warn('  ⚠️  Cache cleanup:', cacheErr.message);
   else console.log('  ✅ Cache cleaned');
 
   const durationMs = Date.now() - startTime;
 
   console.log('\n══════════════════════════════════════════════');
   console.log('✅ CRAWL COMPLETE');
-  console.log(`   Sources run      : ${enabledSources.length} (${batches.length} batch calls)`);
-  console.log(`   Date window      : ${date_window_days} days`);
-  console.log(`   Events found     : ${allCandidates.length}`);
-  console.log(`   After dedupe     : ${unique.length}`);
-  console.log(`   After date filter: ${validEvents.length}`);
-  console.log(`   ── Stored new    : ${stored} (with embeddings)`);
-  console.log(`   ── Updated exist : ${duplicates}`);
-  console.log(`   ── Errors        : ${errors}`);
-  console.log(`   Duration         : ${(durationMs / 1000).toFixed(1)}s`);
+  console.log(`   Tier 1 RSS     : ${rssSources.length} sources`);
+  console.log(`   Tier 2 HTML    : ${htmlSources.length} sources`);
+  console.log(`   Tier 3 gap-fill: ${gapFillRuns} categories`);
+  console.log(`   Candidates     : ${allCandidates.length}`);
+  console.log(`   After quality  : ${valid.length}`);
+  console.log(`   Stored new     : ${stored}`);
+  console.log(`   Skipped (dup)  : ${skipped}`);
+  console.log(`   Errors         : ${errors}`);
+  console.log(`   Duration       : ${(durationMs / 1000).toFixed(1)}s`);
   console.log('══════════════════════════════════════════════');
 
   if (storedTitles.length > 0) {
     console.log('\n📋 Events stored:');
-    storedTitles.forEach(t => console.log(t));
+    storedTitles.slice(0, 30).forEach(t => console.log(t));
+    if (storedTitles.length > 30) console.log(`  ... and ${storedTitles.length - 30} more`);
   }
 
   return {
-    eventsFound: allCandidates.length,
-    eventsUnique: unique.length,
-    eventsRejected: rejectedEvents.length,
-    eventsFiltered: validEvents.length,
-    eventsStored: stored,
-    embeddingsGenerated: vectors.filter(Boolean).length,
-    duplicates,
+    eventsFound:     allCandidates.length,
+    eventsUnique:    unique.length,
+    eventsFiltered:  valid.length,
+    eventsStored:    stored,
+    eventsSkipped:   skipped,
     errors,
-    firstError: firstError || null,
-    sourcesRun: enabledSources.length,
+    firstError:      firstError || null,
+    gapFillRuns,
+    embeddingsGenerated: vectors.filter(Boolean).length,
     durationMs,
-    storedEvents: storedTitles,
   };
 }
 

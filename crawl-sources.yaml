@@ -1,8 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Kickflip Crawl Sources Configuration
+# Kickflip Crawl Sources — v2 (tiered pipeline)
 #
-# Edit this file to control which sites are searched, the date window,
-# and how searches are batched. Changes take effect on the next crawl run.
+# Each source now has:
+#   scrape_method: rss | html | disabled
+#   url:           the actual page/feed URL to hit (not just domain)
+#
+# Tiers:
+#   Tier 1 (rss)   — direct feed fetch, zero Claude tokens. Fast & free.
+#   Tier 2 (html)  — fetch HTML → cheerio strip → single Haiku extract call.
+#                    ~2–4K tokens per source. No web_search, no rate limit risk.
+#   Tier 3 (auto)  — AI gap-fill runs automatically for thin categories.
+#                    Not a source entry. Configured via settings.min_gap_fill.
 #
 # To run on demand:
 #   curl -X POST https://kickflipevents-production.up.railway.app/api/crawl \
@@ -10,165 +18,196 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 settings:
-  date_window_days: 14     # How many days ahead to search (14 = today + 2 weeks)
-  batch_size: 3            # How many sources to combine per Claude API call (saves cost)
-  max_sources_per_run: 10  # Hard cap — stops after this many enabled sources
+  date_window_days:  14     # How many days ahead to crawl
+  min_gap_fill:       5     # Tier 3 triggers if a category has fewer events than this
+  max_html_sources:  15     # Cap: each HTML source costs 1 Haiku call (~3K tokens)
+  gap_fill_delay_ms: 35000  # 35s between AI gap-fill calls (rate limit safety)
 
 
-# ─── Sources ──────────────────────────────────────────────────────────────────
-# Fields:
-#   name        — human label for logs
-#   domain      — used in site: search hint to Claude
-#   category    — hint for Claude (music | art | food | outdoor | comedy | all)
-#   enabled     — set to false to skip without deleting the entry
-#   priority    — lower = searched first (1 = highest priority)
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Tier 1: RSS feeds ────────────────────────────────────────────────────────
+# Zero Claude cost. Pure HTTP fetch + rss-parser. Run first.
 
 sources:
 
-  # ── Batch: aggregators  (Tier 1 — high signal density, check daily) ────────
-  - name: EverOut Seattle
-    domain: everout.com
-    category: all
-    batch: aggregators
-    enabled: true
-    priority: 1
+  - name:          EverOut Seattle
+    url:           https://everout.com/seattle/events/feed/
+    scrape_method: rss
+    category:      all
+    batch:         aggregators
+    enabled:       true
+    priority:      1
+    crawl_frequency: daily
+    notes:         WordPress RSS — highest event density aggregator in Seattle
 
-  - name: Do206
-    domain: do206.com
-    category: music,art,comedy
-    batch: aggregators
-    enabled: true
-    priority: 1
+  - name:          The Stranger
+    url:           https://www.thestranger.com/seattle/events/rss
+    scrape_method: rss
+    category:      music,art,comedy
+    batch:         aggregators
+    enabled:       true
+    priority:      1
+    crawl_frequency: daily
+    notes:         Seattle alt-weekly, strong music/arts coverage
 
-  - name: Visit Seattle
-    domain: visitseattle.org
-    category: all
-    batch: aggregators
-    enabled: true
-    priority: 1
+  - name:          Resident Advisor Seattle
+    url:           https://ra.co/events/us/seattle.rss
+    scrape_method: rss
+    category:      music
+    batch:         ticketing
+    enabled:       true
+    priority:      2
+    crawl_frequency: daily
+    notes:         Electronic music events; RA publishes RSS per city
 
-  # ── Batch: ticketing  (highest event density) ─────────────────────────────
-  - name: Eventbrite Seattle
-    domain: eventbrite.com
-    category: all
-    batch: ticketing
-    enabled: true
-    priority: 1
 
-  - name: AXS Seattle
-    domain: axs.com
-    category: music
-    batch: ticketing
-    enabled: true
-    priority: 1
+  # ─── Tier 2: HTML scrape + Claude extract ─────────────────────────────────
+  # fetch() the page → cheerio strip → single Haiku call to extract JSON.
+  # NO web_search tool. ~2–4K input tokens per source. No rate limit risk.
 
-  - name: Resident Advisor Seattle
-    domain: ra.co
-    category: music
-    batch: ticketing
-    enabled: true
-    priority: 1
+  - name:          Do206
+    url:           https://do206.com/events
+    scrape_method: html
+    category:      music,art,comedy
+    batch:         aggregators
+    enabled:       true
+    priority:      2
+    crawl_frequency: daily
 
-  # ── Batch: media  (local Seattle press) ───────────────────────────────────
-  - name: The Stranger
-    domain: thestranger.com
-    category: music,art,comedy
-    batch: media
-    enabled: true
-    priority: 2
+  - name:          Visit Seattle Events
+    url:           https://visitseattle.org/things-to-do/events/
+    scrape_method: html
+    category:      all
+    batch:         aggregators
+    enabled:       true
+    priority:      2
+    crawl_frequency: daily
 
-  - name: Seattle Times Events
-    domain: seattletimes.com
-    category: all
-    batch: media
-    enabled: true
-    priority: 2
+  - name:          Seattle Art Museum
+    url:           https://www.seattleartmuseum.org/visit/calendar-of-events
+    scrape_method: html
+    category:      art
+    batch:         culture
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  # ── Batch: venues  (specific Seattle venues) ──────────────────────────────
-  - name: Jazz Alley
-    domain: jazzalley.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Nordic Museum
+    url:           https://www.nordicmuseum.org/events
+    scrape_method: html
+    category:      art
+    batch:         culture
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: The Crocodile
-    domain: thecrocodile.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Pioneer Square Gallery
+    url:           https://pioneersquare.org/events
+    scrape_method: html
+    category:      art
+    batch:         culture
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: Neumos
-    domain: neumos.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Jazz Alley
+    url:           https://www.jazzalley.com/events
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: Tractor Tavern
-    domain: tractortavern.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          The Crocodile
+    url:           https://thecrocodile.com/events/
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: Chop Suey
-    domain: chopsuey.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Neumos
+    url:           https://www.neumos.com/events
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: Showbox Seattle
-    domain: showboxpresents.com
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Tractor Tavern
+    url:           https://www.tractortavern.com/shows
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: STG Presents
-    domain: stgpresents.org
-    category: music,art
-    batch: venues
-    enabled: true
-    priority: 3
-    # Covers Neptune, Paramount, Moore Theatre
+  - name:          Chop Suey
+    url:           https://www.chopsuey.com/events
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: The Vera Project
-    domain: theveraproject.org
-    category: music
-    batch: venues
-    enabled: true
-    priority: 3
+  - name:          Showbox Seattle
+    url:           https://www.showboxpresents.com/events/
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  # ── Batch: culture  (arts & museums — weekly crawl sufficient) ─────────────
-  - name: Seattle Art Museum
-    domain: seattleartmuseum.org
-    category: art
-    batch: culture
-    enabled: true
-    priority: 4
+  - name:          STG Presents
+    url:           https://www.stgpresents.org/calendar
+    scrape_method: html
+    category:      music,art
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
+    notes:         Covers Paramount, Moore Theatre, Neptune
 
-  - name: Nordic Museum
-    domain: nordicmuseum.org
-    category: art
-    batch: culture
-    enabled: true
-    priority: 4
+  - name:          The Vera Project
+    url:           https://theveraproject.org/events/
+    scrape_method: html
+    category:      music
+    batch:         venues
+    enabled:       true
+    priority:      3
+    crawl_frequency: weekly
 
-  - name: Pioneer Square
-    domain: pioneersquare.org
-    category: art
-    batch: culture
-    enabled: true
-    priority: 4
+  - name:          AXS Seattle
+    url:           https://www.axs.com/events?q=seattle
+    scrape_method: html
+    category:      music
+    batch:         ticketing
+    enabled:       true
+    priority:      2
+    crawl_frequency: daily
 
-  # ── Batch: extra  (disabled — high noise or API-gated) ────────────────────
-  - name: Ticketmaster Seattle
-    domain: ticketmaster.com
-    category: all
-    batch: extra
-    enabled: false
-    priority: 5
+
+  # ─── Disabled ──────────────────────────────────────────────────────────────
+
+  - name:          Ticketmaster Seattle
+    url:           https://www.ticketmaster.com/search?q=seattle
+    scrape_method: disabled
+    category:      all
+    batch:         extra
+    enabled:       false
+    priority:      5
+    notes:         Anti-scrape protection; use Eventbrite API instead
+
+  - name:          Eventbrite Seattle
+    url:           https://www.eventbrite.com/d/wa--seattle/events/
+    scrape_method: html
+    category:      all
+    batch:         ticketing
+    enabled:       false
+    priority:      2
+    notes:         High JS — enable if HTML scrape yields results; or use Eventbrite API
