@@ -147,18 +147,17 @@ async function searchWithClaude(search) {
 
     if (response.stop_reason === 'tool_use') {
       conversationMessages.push({ role: 'assistant', content: response.content });
+      // For the built-in web_search tool, results are already embedded in the
+      // assistant message (web_search_tool_result_20250305 blocks). DO NOT
+      // resend the full result content — that doubles the token count and blows
+      // through the 50K/min input rate limit. Just ACK each tool_use call.
       const toolResults = response.content
         .filter(b => b.type === 'tool_use')
-        .map(b => {
-          const resultBlock = response.content.find(
-            rb => rb.type === 'web_search_tool_result_20250305' && rb.tool_use_id === b.id
-          );
-          return {
-            type: 'tool_result',
-            tool_use_id: b.id,
-            content: resultBlock ? resultBlock.content : 'Search complete.',
-          };
-        });
+        .map(b => ({
+          type: 'tool_result',
+          tool_use_id: b.id,
+          content: 'Search complete.',
+        }));
       if (toolResults.length > 0) {
         conversationMessages.push({ role: 'user', content: toolResults });
         // On the penultimate turn, nudge Claude to stop searching and output JSON
@@ -305,8 +304,14 @@ export async function runCrawl({ batch: batchFilter } = {}) {
   console.log(`\n🔍 STEP 1: Running ${batches.length} search batch(es)...`);
   let allCandidates = [];
 
-  for (const batch of batches) {
-    const search = buildBatchPrompt(batch, todayStr, windowEndStr);
+  for (let i = 0; i < batches.length; i++) {
+    if (i > 0) {
+      // Spread calls across time to stay under Haiku's 50K input tokens/min limit.
+      // Each multi-turn web search conversation can be 10–20K tokens.
+      console.log(`  ⏳ Waiting 15s before next batch (rate limit spacing)...`);
+      await new Promise(r => setTimeout(r, 15_000));
+    }
+    const search = buildBatchPrompt(batches[i], todayStr, windowEndStr);
     const results = await searchWithClaude(search);
     allCandidates.push(...results);
   }
