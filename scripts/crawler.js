@@ -476,9 +476,18 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
     if (pass) valid.push(e);
     else rejected.push(`  ✗ "${e.title}" — ${reason}`);
   }
+  // Tally rejection reasons for diagnostics
+  const rejectReasons = {};
+  for (const r of rejected) {
+    const reason = r.match(/— (.+)$/)?.[1]?.split(' (')[0] ?? 'unknown';
+    rejectReasons[reason] = (rejectReasons[reason] || 0) + 1;
+  }
   console.log(`  → ${valid.length} pass, ${rejected.length} rejected`);
-  if (rejected.length > 0 && rejected.length <= 10) {
-    rejected.forEach(r => console.log(r));
+  if (rejected.length > 0) {
+    console.log(`  Rejection breakdown: ${JSON.stringify(rejectReasons)}`);
+    // Show first 5 examples
+    rejected.slice(0, 5).forEach(r => console.log(r));
+    if (rejected.length > 5) console.log(`  ... and ${rejected.length - 5} more`);
   }
 
   // ── Tier 3: AI gap-fill (targeted, single-turn) ───────────────────────────

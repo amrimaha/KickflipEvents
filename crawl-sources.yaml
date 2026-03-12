@@ -18,8 +18,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 settings:
-  date_window_days:  14     # How many days ahead to crawl
-  min_gap_fill:       5     # Tier 3 triggers if a category has fewer events than this
+  date_window_days:  30     # 14→30: RSS feeds list events 4-6 weeks ahead; 14d was rejecting ~70%
+  min_gap_fill:       3     # 5→3: only gap-fill when a category is really thin
   max_html_sources:  15     # Cap: each HTML source costs 1 Haiku call (~3K tokens)
   gap_fill_delay_ms: 35000  # 35s between AI gap-fill calls (rate limit safety)
 
