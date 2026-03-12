@@ -73,6 +73,15 @@ sources:
     priority:      2
     crawl_frequency: daily
 
+  - name:          Seattle Times Events
+    url:           https://www.seattletimes.com/life/events/
+    scrape_method: html
+    category:      all
+    batch:         aggregators
+    enabled:       true
+    priority:      2
+    crawl_frequency: daily
+
   - name:          Visit Seattle Events
     url:           https://visitseattle.org/things-to-do/events/
     scrape_method: html
