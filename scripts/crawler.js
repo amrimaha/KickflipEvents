@@ -121,7 +121,7 @@ async function searchWithClaude(search) {
 
   const conversationMessages = [{ role: 'user', content: search.prompt }];
   let finalText = '';
-  const MAX_TURNS = 4;
+  const MAX_TURNS = 8;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     console.log(`  [turn ${turn + 1}] calling Claude...`);
@@ -159,8 +159,13 @@ async function searchWithClaude(search) {
             content: resultBlock ? resultBlock.content : 'Search complete.',
           };
         });
-      if (toolResults.length > 0) conversationMessages.push({ role: 'user', content: toolResults });
-      else break;
+      if (toolResults.length > 0) {
+        conversationMessages.push({ role: 'user', content: toolResults });
+        // On the penultimate turn, nudge Claude to stop searching and output JSON
+        if (turn === MAX_TURNS - 2) {
+          conversationMessages.push({ role: 'user', content: 'Good, now compile all events you found into the JSON array. Output ONLY the JSON array, nothing else.' });
+        }
+      } else break;
     } else break;
   }
 
