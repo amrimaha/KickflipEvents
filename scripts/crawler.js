@@ -167,17 +167,28 @@ async function scrapeRss(source) {
   console.log(`  📡 [rss] ${source.name}...`);
   try {
     const feed = await rssParser.parseURL(source.url);
-    const events = (feed.items ?? []).map(item => normalizeEvent({
-      title:       item.title,
-      startDate:   item.isoDate ? item.isoDate.slice(0, 10) : null,
-      date:        item.pubDate || item.isoDate,
-      link:        item.link,
-      description: item.contentSnippet || item.content || '',
-      category:    (item.categories ?? [source.category ?? 'other'])[0],
-      location:    '',
-      price:       null,
-    }, source.name));
-    console.log(`  ✅ [rss] ${source.name}: ${events.length} items`);
+    const now = new Date();
+    const events = (feed.items ?? []).map(item => {
+      // item.isoDate is the RSS *publication* date, not necessarily the event date.
+      // Event calendar plugins (EverOut/WordPress) often set pubDate = event start date,
+      // so a FUTURE isoDate is likely the actual event date.
+      // A PAST isoDate is the publication date of an already-announced event — we don't
+      // know the real event date from RSS alone, so leave startDate null (passes quality gate).
+      const isoDate = item.isoDate ? new Date(item.isoDate) : null;
+      const startDate = isoDate && isoDate > now ? item.isoDate.slice(0, 10) : null;
+
+      return normalizeEvent({
+        title:       item.title,
+        startDate,
+        date:        startDate || item.pubDate || null,
+        link:        item.link,
+        description: item.contentSnippet || item.content || '',
+        category:    (item.categories ?? [source.category ?? 'other'])[0],
+        location:    '',
+        price:       null,
+      }, source.name);
+    });
+    console.log(`  ✅ [rss] ${source.name}: ${events.length} items (${events.filter(e => e.startDate).length} dated)`);
     return events;
   } catch (err) {
     console.warn(`  ⚠️  [rss] ${source.name} failed: ${err.message}`);
@@ -444,17 +455,20 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
     const events = await scrapeRss(src);
     allCandidates.push(...events);
   }
-  console.log(`  → ${allCandidates.length} candidates from RSS`);
+  const rssCount = allCandidates.length;
+  console.log(`  → ${rssCount} candidates from RSS`);
 
   // ── Tier 2: HTML + Claude extract (cheap) ────────────────────────────────
   console.log(`\n🌐 TIER 2: HTML scrape + Claude extract (${htmlSources.length} sources)...`);
   for (let i = 0; i < htmlSources.length; i++) {
     const events = await scrapeHtml(htmlSources[i]);
     allCandidates.push(...events);
+    if (events.length === 0) console.log(`  ⚠️  [html] ${htmlSources[i].name}: 0 events — may need Playwright or different URL`);
     // Small courtesy delay between HTML+Claude calls (~2-4K tokens each, well under limit)
     if (i < htmlSources.length - 1) await SLEEP(1500);
   }
-  console.log(`  → ${allCandidates.length} total candidates after HTML`);
+  const htmlCount = allCandidates.length - rssCount;
+  console.log(`  → ${htmlCount} from HTML, ${rssCount} from RSS, ${allCandidates.length} total`);
 
   // ── Normalize + Deduplicate ────────────────────────────────────────────────
   console.log('\n🔄 NORMALIZE + DEDUPLICATE...');
