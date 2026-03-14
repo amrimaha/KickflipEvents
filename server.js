@@ -181,6 +181,9 @@ async function checkCache(queryHash) {
   return data || null;
 }
 
+// Returns true only for real http(s) URLs — filters out "null", "undefined", "", etc.
+const isValidImageUrl = (u) => typeof u === 'string' && /^https?:\/\/.+/.test(u.trim());
+
 // Unsplash fallback images by category — shared by chat search helpers + GET /api/events
 const UNSPLASH_FALLBACK = {
   music:    'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format',
@@ -205,7 +208,7 @@ async function fetchEventsByIds(ids) {
   return (data || []).map(row => {
     const p = row.payload || {};
     const cat = (p.category || (Array.isArray(row.categories) ? row.categories[0] : null) || 'other').toLowerCase();
-    if (!p.imageUrl) p.imageUrl = row.image_url || UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    if (!isValidImageUrl(p.imageUrl)) p.imageUrl = isValidImageUrl(row.image_url) ? row.image_url : (UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default);
     return { id: row.id, ...p };
   });
 }
@@ -237,7 +240,7 @@ async function searchByEmbedding(queryVector, threshold = 0.72, limit = 10, cons
   return (data || []).map(row => {
     const p = row.payload || {};
     const cat = (p.category || 'other').toLowerCase();
-    if (!p.imageUrl) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    if (!isValidImageUrl(p.imageUrl)) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
     return { similarity: row.similarity, ...p, id: row.id };
   });
 }
@@ -258,7 +261,7 @@ async function searchChronological(constraints = {}, limit = 10) {
   return (data || []).map(row => {
     const p = row.payload || {};
     const cat = (p.category || 'other').toLowerCase();
-    if (!p.imageUrl) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    if (!isValidImageUrl(p.imageUrl)) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
     return { ...p, id: row.id };
   });
 }
@@ -507,7 +510,7 @@ vibeTags (array), price, link (real URL).`,
         location:    stripTags(e.location),
         date:        stripTags(e.date),
         price:       stripTags(e.price),
-        imageUrl:    e.imageUrl || UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default,
+        imageUrl:    isValidImageUrl(e.imageUrl) ? e.imageUrl : (UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default),
       };
     });
   }
@@ -1007,7 +1010,9 @@ app.get('/api/events', async (_req, res) => {
       category = category || 'other';
 
       // ── Image — DB column → payload → Unsplash fallback by category ───────
-      const imageUrl = row.image_url || p.imageUrl
+      // isValidImageUrl guards against "null", "undefined", empty strings stored in DB
+      const imageUrl = (isValidImageUrl(row.image_url) ? row.image_url : null)
+        || (isValidImageUrl(p.imageUrl) ? p.imageUrl : null)
         || UNSPLASH[category] || UNSPLASH.default;
 
       // ── Price — filter "$NULL", "null", "TBD", empty ─────────────────────

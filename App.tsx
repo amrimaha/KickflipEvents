@@ -415,6 +415,7 @@ const App: React.FC = () => {
 
   const latestUserMessageRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const getHistoryKey = (u: User | null) => u ? `kickflip_history_${u.id}` : 'kickflip_history_guest';
   const isSuperAdmin = user?.email === 'bryce@kickflip.co';
@@ -1068,26 +1069,6 @@ const App: React.FC = () => {
     });
   }, [currentEvents, filterCategory, filterVibe, filterTime, selectedDate, allActiveEvents]);
 
-  // --- DAY TABS (kickflip-psi style: Anytime + next 7 days) ---
-  const dayTabs = useMemo(() => {
-    const tabs: Array<{ label: string; date: Date | null; count: number }> = [];
-    tabs.push({ label: 'Anytime', date: null, count: allActiveEvents.length });
-    for (let i = 0; i < 7; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
-      const dayNum = d.getDate();
-      const count = allActiveEvents.filter(evt => {
-        if (evt.startDate) {
-          const [y, m, day] = evt.startDate.split('-').map(Number);
-          return new Date(y, m - 1, day).toDateString() === d.toDateString();
-        }
-        return false;
-      }).length;
-      tabs.push({ label: `${dayName} ${dayNum}`, date: new Date(d), count });
-    }
-    return tabs;
-  }, [allActiveEvents]);
 
   // --- CATEGORY COUNTS ---
   const categoryCounts = useMemo(() => {
@@ -1393,32 +1374,8 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="mb-6 border-b border-white/10 pb-4">
-                  {/* Day-of-week tabs */}
-                  <div className="flex gap-1 overflow-x-auto no-scrollbar bg-white/5 rounded-lg p-1 w-fit max-w-full">
-                    {dayTabs.map((tab, idx) => {
-                      const isActive = tab.date === null
-                        ? (filterTime === 'all' || filterTime === 'tonight' || filterTime === 'weekend')
-                        : filterTime === 'custom' && selectedDate?.toDateString() === tab.date.toDateString();
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            if (tab.date === null) { setFilterTime('all'); setSelectedDate(null); }
-                            else { setFilterTime('custom'); setSelectedDate(tab.date); }
-                          }}
-                          className={`flex-shrink-0 px-3 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
-                            isActive ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          {tab.label}
-                          {!isActive && tab.count > 0 && <span className="ml-1 opacity-50 font-normal">{tab.count}</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-
                   {filterVibe && (
-                    <div className="flex items-center gap-2 px-4 py-2 mt-3 rounded-full bg-white/10 border border-white/20 animate-in fade-in w-fit">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-3 rounded-full bg-white/10 border border-white/20 animate-in fade-in w-fit">
                       <span className="text-xs text-white/60 uppercase font-bold">Vibe:</span>
                       <span className="text-sm font-bold text-white">#{filterVibe}</span>
                       <button onClick={() => setFilterVibe('')} className="p-0.5 rounded-full hover:bg-white/20 text-white/50 hover:text-white">
@@ -1427,8 +1384,63 @@ const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Category tabs with event counts */}
-                  <div className="flex gap-2 mt-4 justify-start overflow-x-auto no-scrollbar pb-2 snap-x">
+                  {/* Category + Calendar row */}
+                  <div className="flex gap-2 justify-start overflow-x-auto no-scrollbar pb-2 snap-x items-center">
+
+                    {/* Calendar date picker chip */}
+                    <div className="relative flex-shrink-0 snap-start">
+                      <input
+                        ref={dateInputRef}
+                        type="date"
+                        className="absolute opacity-0 pointer-events-none w-0 h-0 overflow-hidden"
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            const [y, m, d] = e.target.value.split('-').map(Number);
+                            setFilterTime('custom');
+                            setSelectedDate(new Date(y, m - 1, d));
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (typeof (dateInputRef.current as any)?.showPicker === 'function') {
+                            (dateInputRef.current as any).showPicker();
+                          } else {
+                            dateInputRef.current?.click();
+                          }
+                        }}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all whitespace-nowrap ${
+                          filterTime === 'custom' && selectedDate
+                            ? 'bg-white text-black border-white'
+                            : 'bg-transparent text-white/60 border-white/20 hover:border-white hover:text-white'
+                        }`}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                          <line x1="16" y1="2" x2="16" y2="6"></line>
+                          <line x1="8" y1="2" x2="8" y2="6"></line>
+                          <line x1="3" y1="10" x2="21" y2="10"></line>
+                        </svg>
+                        {filterTime === 'custom' && selectedDate
+                          ? selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          : 'Any Date'}
+                        {filterTime === 'custom' && selectedDate && (
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFilterTime('all');
+                              setSelectedDate(null);
+                              if (dateInputRef.current) dateInputRef.current.value = '';
+                            }}
+                            className="ml-0.5 opacity-60 hover:opacity-100 font-black"
+                          >×</span>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* All pill */}
                     <button
                       onClick={() => setFilterCategory('all')}
                       className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider border transition-all snap-start ${
@@ -1439,6 +1451,8 @@ const App: React.FC = () => {
                     >
                       All {categoryCounts.all > 0 && <span className="ml-1 opacity-60 font-normal">{categoryCounts.all}</span>}
                     </button>
+
+                    {/* Category pills */}
                     {Object.keys(CATEGORY_COLORS).map(cat => (
                       <button
                         key={cat}
