@@ -644,18 +644,6 @@ export const EventCard: React.FC<EventCardProps> = ({
           pointerEvents: 'none', zIndex: 10,
         }} />
 
-        {/* Category badge — top left */}
-        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 20 }}>
-          <span style={{
-            backgroundColor: categoryColor,
-            padding: '3px 8px', borderRadius: '6px',
-            fontSize: '10px', fontWeight: 700,
-            textTransform: 'uppercase', letterSpacing: '0.06em', color: '#000',
-          }}>
-            {event.category}
-          </span>
-        </div>
-
         {/* Price badge — top right */}
         {event.price && !isSuperAdmin && !actionSlot && (
           <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 20 }}>
@@ -693,6 +681,17 @@ export const EventCard: React.FC<EventCardProps> = ({
           padding: '14px 14px 14px',
           zIndex: 20,
         }}>
+          {/* Category chip — small, lives with the text */}
+          <div style={{ marginBottom: 6 }}>
+            <span style={{
+              backgroundColor: categoryColor,
+              padding: '2px 7px', borderRadius: '5px',
+              fontSize: '9px', fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.07em', color: '#000',
+            }}>
+              {event.category}
+            </span>
+          </div>
           <h3 style={{
             fontSize: '16px', fontWeight: 800, color: 'white', lineHeight: 1.25,
             margin: '0 0 5px', overflow: 'hidden', display: '-webkit-box',
