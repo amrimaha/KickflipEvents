@@ -792,11 +792,13 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
   const { stored, skipped, errors, storedTitles, firstError } =
     await upsertEvents(valid, vectors, windowEnd);
 
-  // ── OG image enrichment (best-effort, $0 Claude cost) ────────────────────
-  const imagesEnriched = await enrichImages(valid);
-
-  // ── AI Tagging (best-effort, ~$0.002 per 10 events) ──────────────────────
+  // ── AI Tagging first — writes tags into payload using in-memory event obj ─
+  // enrichImages must run AFTER so it can read the tagged payload from DB
+  // and merge imageUrl on top (prevents tagging from overwriting imageUrl).
   const eventsTagged = await runTagging(valid);
+
+  // ── OG image enrichment — reads current DB payload (has tags), adds imageUrl
+  const imagesEnriched = await enrichImages(valid);
 
   // ── Cache cleanup ─────────────────────────────────────────────────────────
   console.log('\n🧹 Cache cleanup...');
