@@ -436,7 +436,9 @@ async function enrichImages(events, limit = 40) {
         const updatedPayload = { ...existing.payload, imageUrl };
         await supabase
           .from('kickflip_events')
-          .update({ payload: updatedPayload })
+          // Write to both payload.imageUrl (used by RPC) and image_url column
+          // (dedicated column, matches Bryce's schema — enables SQL filtering)
+          .update({ payload: updatedPayload, image_url: imageUrl })
           .eq('id', existing.id);
         enriched++;
       }
