@@ -306,6 +306,89 @@ Text: ${bodyText}`,
   }
 }
 
+// ─── Tier 2b: Playwright + Claude extract (JS-rendered venues) ───────────────
+//
+// Same Claude Haiku extract as scrapeHtml, but page content is captured AFTER
+// the browser executes JavaScript — so venue sites built on React/Vue/Next.js
+// actually render their event listings before we read them.
+//
+// One browser instance is launched per crawl run (passed in), one page per
+// source. Args --no-sandbox and --disable-dev-shm-usage are required in
+// Railway's containerised environment.
+
+async function scrapePlaywright(source, browser) {
+  console.log(`  🎭 [playwright] ${source.name}...`);
+  let page;
+  try {
+    page = await browser.newPage();
+    await page.setExtraHTTPHeaders({
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    });
+    await page.goto(source.url, { waitUntil: 'networkidle', timeout: 30000 });
+
+    // Extract visible text after JS has rendered
+    const bodyText = await page.evaluate(() => {
+      document.querySelectorAll('script, style, nav, footer, noscript, iframe, [aria-hidden="true"]')
+        .forEach(el => el.remove());
+      const container = document.querySelector('main, [class*="event"], [id*="event"], article');
+      return ((container || document.body).innerText || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 10000);
+    });
+
+    if (bodyText.length < 80) {
+      console.warn(`  ⚠️  [playwright] ${source.name}: page too short after render`);
+      return [];
+    }
+
+    // Same Claude Haiku extract prompt as scrapeHtml
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: `Extract upcoming Seattle events from this page text.
+Output ONLY a valid JSON array — no markdown, no explanation.
+Schema (use null for unknown fields):
+[{"title":"string","startDate":"YYYY-MM-DD","startTime":"HH:MM AM/PM","location":"Venue, Seattle WA","description":"string","category":"music|art|food|outdoor|comedy|wellness|sports|party|other","price":"$N or Free","link":"https://real-url"}]
+If no events, return [].
+
+Page URL: ${source.url}
+Text: ${bodyText}`,
+      }],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) {
+      console.warn(`  ⚠️  [playwright] ${source.name}: no JSON in response`);
+      return [];
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      parsed = JSON.parse(jsonrepair(match[0]));
+    }
+    if (!Array.isArray(parsed)) return [];
+
+    const events = parsed.map(e => normalizeEvent({
+      ...e,
+      link: e.link?.startsWith('http') ? e.link : source.url,
+    }, source.name));
+    console.log(`  ✅ [playwright] ${source.name}: ${events.length} events`);
+    return events;
+  } catch (err) {
+    console.warn(`  ⚠️  [playwright] ${source.name} failed: ${err.message}`);
+    return [];
+  } finally {
+    await page?.close();
+  }
+}
+
 // ─── Tier 3: AI gap-fill (single-turn web_search) ────────────────────────────
 //
 // Based directly on Bryce's discovery.ts approach:
@@ -629,16 +712,18 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
     .filter(s => !batchFilter || s.batch === batchFilter)
     .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
-  const rssSources  = allSources.filter(s => s.scrape_method === 'rss');
-  const htmlSources = allSources.filter(s => s.scrape_method === 'html').slice(0, max_html_sources);
+  const rssSources        = allSources.filter(s => s.scrape_method === 'rss');
+  const htmlSources       = allSources.filter(s => s.scrape_method === 'html').slice(0, max_html_sources);
+  const playwrightSources = allSources.filter(s => s.scrape_method === 'playwright');
 
-  console.log('\n╔════════════════════════════════════════════════╗');
-  console.log('║     Kickflip Crawler v2 — Tiered Pipeline     ║');
-  console.log(`║  Window : ${toISO(windowStart)} → ${toISO(windowEnd)} (${date_window_days}d)     ║`);
-  console.log(`║  Tier 1 : ${rssSources.length} RSS sources (free, zero Claude)       ║`);
-  console.log(`║  Tier 2 : ${htmlSources.length} HTML sources (~2-4K tokens each)    ║`);
-  console.log(`║  Tier 3 : AI gap-fill if category < ${min_gap_fill} events           ║`);
-  console.log('╚════════════════════════════════════════════════╝');
+  console.log('\n╔═════════════════════════════════════════════════════╗');
+  console.log('║      Kickflip Crawler v3 — Tiered Pipeline          ║');
+  console.log(`║  Window  : ${toISO(windowStart)} → ${toISO(windowEnd)} (${date_window_days}d)        ║`);
+  console.log(`║  Tier 1  : ${rssSources.length} RSS sources (free, zero Claude)          ║`);
+  console.log(`║  Tier 2a : ${htmlSources.length} HTML sources (~2-4K tokens each)       ║`);
+  console.log(`║  Tier 2b : ${playwrightSources.length} Playwright sources (JS-rendered venues)  ║`);
+  console.log(`║  Tier 3  : AI gap-fill if category < ${min_gap_fill} events              ║`);
+  console.log('╚═════════════════════════════════════════════════════╝');
 
   let allCandidates = [];
 
@@ -651,17 +736,42 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
   const rssCount = allCandidates.length;
   console.log(`  → ${rssCount} candidates from RSS`);
 
-  // ── Tier 2: HTML + Claude extract (cheap) ────────────────────────────────
-  console.log(`\n🌐 TIER 2: HTML scrape + Claude extract (${htmlSources.length} sources)...`);
+  // ── Tier 2a: HTML + Claude extract (server-rendered sites) ───────────────
+  console.log(`\n🌐 TIER 2a: HTML scrape + Claude extract (${htmlSources.length} sources)...`);
   for (let i = 0; i < htmlSources.length; i++) {
     const events = await scrapeHtml(htmlSources[i]);
     allCandidates.push(...events);
-    if (events.length === 0) console.log(`  ⚠️  [html] ${htmlSources[i].name}: 0 events — may need Playwright or different URL`);
-    // Small courtesy delay between HTML+Claude calls (~2-4K tokens each, well under limit)
+    if (events.length === 0) console.log(`  ⚠️  [html] ${htmlSources[i].name}: 0 events`);
     if (i < htmlSources.length - 1) await SLEEP(1500);
   }
   const htmlCount = allCandidates.length - rssCount;
-  console.log(`  → ${htmlCount} from HTML, ${rssCount} from RSS, ${allCandidates.length} total`);
+  console.log(`  → ${htmlCount} from HTML`);
+
+  // ── Tier 2b: Playwright + Claude extract (JS-rendered venues) ────────────
+  // One browser instance shared across all playwright sources; each source
+  // gets its own page so tabs are isolated and failures don't cascade.
+  if (playwrightSources.length > 0) {
+    console.log(`\n🎭 TIER 2b: Playwright + Claude extract (${playwrightSources.length} sources)...`);
+    let browser = null;
+    try {
+      const { chromium } = await import('playwright');
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      for (let i = 0; i < playwrightSources.length; i++) {
+        const events = await scrapePlaywright(playwrightSources[i], browser);
+        allCandidates.push(...events);
+        if (i < playwrightSources.length - 1) await SLEEP(1500);
+      }
+    } catch (err) {
+      console.warn(`  ⚠️  Playwright unavailable: ${err.message} — skipping ${playwrightSources.length} sources`);
+    } finally {
+      await browser?.close();
+    }
+    const playwrightCount = allCandidates.length - rssCount - htmlCount;
+    console.log(`  → ${playwrightCount} from Playwright`);
+  }
 
   // ── Normalize + Deduplicate (3 passes) ────────────────────────────────────
   console.log('\n🔄 NORMALIZE + DEDUPLICATE...');
@@ -812,9 +922,10 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
 
   console.log('\n══════════════════════════════════════════════');
   console.log('✅ CRAWL COMPLETE');
-  console.log(`   Tier 1 RSS     : ${rssSources.length} sources`);
-  console.log(`   Tier 2 HTML    : ${htmlSources.length} sources`);
-  console.log(`   Tier 3 gap-fill: ${gapFillRuns} categories`);
+  console.log(`   Tier 1 RSS        : ${rssSources.length} sources`);
+  console.log(`   Tier 2a HTML      : ${htmlSources.length} sources`);
+  console.log(`   Tier 2b Playwright: ${playwrightSources.length} sources`);
+  console.log(`   Tier 3 gap-fill   : ${gapFillRuns} categories`);
   console.log(`   Candidates     : ${allCandidates.length}`);
   console.log(`   After quality  : ${valid.length}`);
   console.log(`   Stored new     : ${stored}`);

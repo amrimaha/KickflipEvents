@@ -118,9 +118,11 @@ sources:
     priority:      3
     crawl_frequency: weekly
 
+  # ─── Tier 2b: Playwright (JS-rendered venues — plain fetch returns empty shell) ─
+
   - name:          Jazz Alley
     url:           https://www.jazzalley.com/events
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -129,7 +131,7 @@ sources:
 
   - name:          The Crocodile
     url:           https://thecrocodile.com/events/
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -138,7 +140,7 @@ sources:
 
   - name:          Neumos
     url:           https://www.neumos.com/events
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -147,7 +149,7 @@ sources:
 
   - name:          Tractor Tavern
     url:           https://www.tractortavern.com/shows
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -156,7 +158,7 @@ sources:
 
   - name:          Chop Suey
     url:           https://www.chopsuey.com/events
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -165,7 +167,7 @@ sources:
 
   - name:          Showbox Seattle
     url:           https://www.showboxpresents.com/events/
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -174,7 +176,7 @@ sources:
 
   - name:          STG Presents
     url:           https://www.stgpresents.org/calendar
-    scrape_method: html
+    scrape_method: playwright
     category:      music,art
     batch:         venues
     enabled:       true
@@ -184,7 +186,7 @@ sources:
 
   - name:          The Vera Project
     url:           https://theveraproject.org/events/
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         venues
     enabled:       true
@@ -193,7 +195,7 @@ sources:
 
   - name:          AXS Seattle
     url:           https://www.axs.com/events?q=seattle
-    scrape_method: html
+    scrape_method: playwright
     category:      music
     batch:         ticketing
     enabled:       true
@@ -214,9 +216,9 @@ sources:
 
   - name:          Eventbrite Seattle
     url:           https://www.eventbrite.com/d/wa--seattle/events/
-    scrape_method: html
+    scrape_method: playwright
     category:      all
     batch:         ticketing
     enabled:       false
     priority:      2
-    notes:         High JS — enable if HTML scrape yields results; or use Eventbrite API
+    notes:         High JS — enable after Playwright is confirmed working
