@@ -913,6 +913,38 @@ app.post('/api/admin/metrics/snapshot', async (req, res) => {
 // No auth required — anonymous tracking via anon_id (localStorage UUID).
 // Fire-and-forget from the frontend: errors must not block the UX.
 //
+// ─── GET /api/events — Live feed of active crawled events ────────────
+//
+// Returns up to 150 upcoming events from Supabase ordered by start_time.
+// Frontend uses this to replace the hardcoded FEATURED_EVENTS on mount.
+// Falls back to FEATURED_EVENTS client-side if this endpoint is unavailable.
+
+app.get('/api/events', async (_req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('kickflip_events')
+      .select('id, payload, image_url, start_time')
+      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .order('start_time', { ascending: true, nullsFirst: false })
+      .limit(150);
+
+    if (error) throw new Error(error.message);
+
+    const events = (data || []).map(row => ({
+      id: row.id,
+      ...(row.payload || {}),
+      // Prefer the dedicated image_url column (written by enrichImages)
+      imageUrl: row.image_url || (row.payload || {}).imageUrl || null,
+    }));
+
+    res.json({ events });
+  } catch (err) {
+    console.error('[GET /api/events] Error:', err.message);
+    res.status(500).json({ error: err.message, events: [] });
+  }
+});
+
 // Body: { event_id, action, anon_id, user_id?, session_id?, source?, extras? }
 // Actions: view_detail | cta_click | save | unsave | share | checkout_start
 

@@ -402,7 +402,7 @@ function extractOgImage(html) {
   return null;
 }
 
-async function enrichImages(events, limit = 40) {
+async function enrichImages(events, limit = 150) {
   // Only enrich events that were newly stored (have a source_url, no imageUrl)
   const needsImage = events
     .filter(e => e.link && !e.imageUrl)

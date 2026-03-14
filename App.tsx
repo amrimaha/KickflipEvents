@@ -285,6 +285,9 @@ const App: React.FC = () => {
       }
       return shuffled;
   });
+  // Live crawled events fetched from the backend on mount.
+  // When populated, replaces FEATURED_EVENTS as the base feed.
+  const [liveFeedEvents, setLiveFeedEvents] = useState<KickflipEvent[] | null>(null);
 
   const [user, setUser] = useState<User | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
@@ -297,9 +300,14 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setSuggestionChips(generateSessionChips());
-    // Warm up Railway server on mount so first chat isn't slow/failing after cold start
     const apiUrl = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
-    fetch(`${apiUrl}/health`).catch(() => {/* silent — just waking the service */});
+    // Warm up Railway server on mount so first chat isn't slow/failing after cold start
+    fetch(`${apiUrl}/health`).catch(() => {/* silent */});
+    // Fetch live crawled events — replaces FEATURED_EVENTS as base feed once loaded
+    fetch(`${apiUrl}/api/events`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.events?.length) setLiveFeedEvents(data.events); })
+      .catch(() => {/* silent — FEATURED_EVENTS remains as fallback */});
   }, []);
 
   // --- SUPABASE SYNC ---
@@ -413,7 +421,9 @@ const App: React.FC = () => {
 
   const allActiveEvents = useMemo(() => {
     const now = new Date();
-    const featured = sessionFeaturedEvents.map(fe => {
+    // Prefer live crawled events; fall back to hardcoded FEATURED_EVENTS
+    const baseEvents: KickflipEvent[] = liveFeedEvents ?? sessionFeaturedEvents;
+    const featured = baseEvents.map(fe => {
        const override = createdEvents.find(ce => ce.id === fe.id);
        if (override) {
            return draftToEvent(override);
@@ -433,7 +443,7 @@ const App: React.FC = () => {
     const custom = createdEvents
         .filter(ce => {
             if (ce.status !== 'active') return false;
-            if (FEATURED_EVENTS.some(fe => fe.id === ce.id)) return false;
+            if (baseEvents.some(fe => fe.id === ce.id)) return false;
             if (ce.endDate) {
                 const endDateTime = new Date(`${ce.endDate}T${ce.endTime || '23:59'}`);
                 const visibilityCutoff = new Date(endDateTime.getTime() + 24 * 60 * 60 * 1000); 
@@ -448,7 +458,7 @@ const App: React.FC = () => {
         .map(draft => draftToEvent(draft));
     
     return [...featured, ...custom];
-  }, [createdEvents, sessionFeaturedEvents]);
+  }, [createdEvents, sessionFeaturedEvents, liveFeedEvents]);
 
   // ... (auth functions preserved) ...
   const parseJwt = (token: string) => {
