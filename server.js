@@ -20,8 +20,11 @@ import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
+import pkg from 'pg';
 import { embedQuery, embedEvent } from './services/embeddingService.js';
 import { runCrawl } from './scripts/crawler.js';
+
+const { Pool } = pkg;
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -33,6 +36,33 @@ const supabase     = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+// ─── Direct PG pool — saved events (portable to AWS RDS, no Supabase SDK) ────
+// Set DATABASE_URL in Railway to your Supabase Transaction Pooler string:
+//   postgresql://postgres.PROJECT:PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+const pgPool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 5,
+    })
+  : null;
+
+// Auto-create kickflip_saved_events table (no FK constraint → works without users table)
+if (pgPool) {
+  pgPool.query(`
+    CREATE TABLE IF NOT EXISTS kickflip_saved_events (
+      id            BIGSERIAL PRIMARY KEY,
+      user_id       TEXT        NOT NULL,
+      event_id      TEXT        NOT NULL,
+      event_payload JSONB       NOT NULL,
+      source_url    TEXT,
+      saved_at      TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (user_id, event_id)
+    );
+    CREATE INDEX IF NOT EXISTS kickflip_saved_events_user_idx ON kickflip_saved_events (user_id);
+  `).catch(e => console.warn('[pg:init] kickflip_saved_events table setup failed:', e.message));
+}
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] }));
 app.options('*', cors()); // respond to CORS preflight for all routes
@@ -791,85 +821,87 @@ function resolveEventStartDate(payload) {
   return null;
 }
 
+// ─── Saved Events — direct pg (no Supabase SDK, portable to AWS RDS) ───────────
+// Requires DATABASE_URL env var (Supabase Transaction Pooler connection string).
+// Falls back to 503 with a clear message when DATABASE_URL is not set so the
+// frontend localStorage-only path keeps working for guests.
+
+function savedEventsUnavailable(res) {
+  return res.status(503).json({ error: 'DATABASE_URL not configured — saved events unavailable on server' });
+}
+
 // POST /api/saved-events — save an event for a user
 app.post('/api/saved-events', async (req, res) => {
+  if (!pgPool) return savedEventsUnavailable(res);
   const { user_id, event_id, event_payload, source_url } = req.body;
   if (!user_id || !event_id || !event_payload) {
     return res.status(400).json({ error: 'user_id, event_id and event_payload are required' });
   }
-
-  const { error } = await supabase.from('saved_events').upsert({
-    user_id,
-    event_id,
-    event_payload,
-    // Prefer explicitly-passed source_url, fall back to link field inside the payload
-    source_url: source_url || event_payload?.link || null,
-    saved_at: new Date().toISOString(),
-  }, { onConflict: 'user_id,event_id' });
-
-  if (error) {
-    console.error('[saved-events] save error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    await pgPool.query(
+      `INSERT INTO kickflip_saved_events (user_id, event_id, event_payload, source_url, saved_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id, event_id)
+       DO UPDATE SET event_payload = EXCLUDED.event_payload,
+                     source_url    = EXCLUDED.source_url,
+                     saved_at      = NOW()`,
+      [user_id, event_id, JSON.stringify(event_payload), source_url || event_payload?.link || null]
+    );
+    return res.status(201).json({ success: true, event_id });
+  } catch (err) {
+    console.error('[saved-events] save error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
-
-  return res.status(201).json({ success: true, event_id });
 });
 
 // DELETE /api/saved-events/:eventId — unsave an event for a user
 app.delete('/api/saved-events/:eventId', async (req, res) => {
+  if (!pgPool) return savedEventsUnavailable(res);
   const { eventId } = req.params;
   const { user_id } = req.body;
   if (!user_id) return res.status(400).json({ error: 'user_id is required in request body' });
-
-  const { error } = await supabase
-    .from('saved_events')
-    .delete()
-    .eq('user_id', user_id)
-    .eq('event_id', eventId);
-
-  if (error) {
-    console.error('[saved-events] delete error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    await pgPool.query(
+      'DELETE FROM kickflip_saved_events WHERE user_id = $1 AND event_id = $2',
+      [user_id, eventId]
+    );
+    return res.json({ success: true, event_id: eventId });
+  } catch (err) {
+    console.error('[saved-events] delete error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
-
-  return res.json({ success: true, event_id: eventId });
 });
 
 // GET /api/saved-events?user_id=xxx — list a user's saved events
 // Returns only future / ongoing events (start_date >= today, or date unknown).
 app.get('/api/saved-events', async (req, res) => {
+  if (!pgPool) return savedEventsUnavailable(res);
   const { user_id } = req.query;
   if (!user_id) return res.status(400).json({ error: 'user_id query param is required' });
-
-  const { data, error } = await supabase
-    .from('saved_events')
-    .select('event_id, event_payload, source_url, saved_at')
-    .eq('user_id', user_id)
-    .order('saved_at', { ascending: false });
-
-  if (error) {
-    console.error('[saved-events] fetch error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    const { rows } = await pgPool.query(
+      'SELECT event_id, event_payload, source_url, saved_at FROM kickflip_saved_events WHERE user_id = $1 ORDER BY saved_at DESC',
+      [user_id]
+    );
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const active = rows.filter(row => {
+      const d = resolveEventStartDate(row.event_payload);
+      return d === null || d >= now;
+    });
+    return res.json({
+      saved_events: active.map(row => ({
+        event_id:   row.event_id,
+        saved_at:   row.saved_at,
+        source_url: row.source_url || row.event_payload?.link || null,
+        event: { id: row.event_id, ...row.event_payload },
+      })),
+      total: active.length,
+    });
+  } catch (err) {
+    console.error('[saved-events] fetch error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
-
-  const now = new Date();
-  now.setHours(0, 0, 0, 0); // compare at day boundary
-
-  // Filter out events whose start date is in the past
-  const active = (data || []).filter(row => {
-    const d = resolveEventStartDate(row.event_payload);
-    return d === null || d >= now; // keep if date unknown or in the future
-  });
-
-  return res.json({
-    saved_events: active.map(row => ({
-      event_id:   row.event_id,
-      saved_at:   row.saved_at,
-      source_url: row.source_url || row.event_payload?.link || null,
-      event: { id: row.event_id, ...row.event_payload },
-    })),
-    total: active.length,
-  });
 });
 
 // ─── GET /api/admin/telemetry — live metrics for dashboard ───────────
