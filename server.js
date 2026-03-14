@@ -181,14 +181,33 @@ async function checkCache(queryHash) {
   return data || null;
 }
 
+// Unsplash fallback images by category — shared by chat search helpers + GET /api/events
+const UNSPLASH_FALLBACK = {
+  music:    'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format',
+  art:      'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
+  arts:     'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
+  food:     'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800&fit=crop&auto=format',
+  outdoor:  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&fit=crop&auto=format',
+  comedy:   'https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=800&fit=crop&auto=format',
+  sports:   'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&fit=crop&auto=format',
+  wellness: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format',
+  party:    'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format',
+  default:  'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&fit=crop&auto=format',
+};
+
 /** Fetch full event objects from Supabase by id array */
 async function fetchEventsByIds(ids) {
   if (!ids || ids.length === 0) return [];
   const { data } = await supabase
     .from('kickflip_events')
-    .select('id, payload')
+    .select('id, payload, image_url, categories')
     .in('id', ids);
-  return (data || []).map(row => ({ id: row.id, ...(row.payload || {}) }));
+  return (data || []).map(row => {
+    const p = row.payload || {};
+    const cat = (p.category || (Array.isArray(row.categories) ? row.categories[0] : null) || 'other').toLowerCase();
+    if (!p.imageUrl) p.imageUrl = row.image_url || UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    return { id: row.id, ...p };
+  });
 }
 
 /** Save a result to query_cache (6-hour TTL) */
@@ -215,7 +234,12 @@ async function searchByEmbedding(queryVector, threshold = 0.72, limit = 10, cons
     filter_is_free: isFree !== undefined ? isFree : null,
   });
   if (error) throw new Error(`pgvector search error: ${error.message}`);
-  return (data || []).map(row => ({ similarity: row.similarity, ...(row.payload || {}), id: row.id }));
+  return (data || []).map(row => {
+    const p = row.payload || {};
+    const cat = (p.category || 'other').toLowerCase();
+    if (!p.imageUrl) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    return { similarity: row.similarity, ...p, id: row.id };
+  });
 }
 
 /**
@@ -231,7 +255,12 @@ async function searchChronological(constraints = {}, limit = 10) {
     filter_is_free: isFree !== undefined ? isFree : null,
   });
   if (error) throw new Error(`chronological search error: ${error.message}`);
-  return (data || []).map(row => ({ ...(row.payload || {}), id: row.id }));
+  return (data || []).map(row => {
+    const p = row.payload || {};
+    const cat = (p.category || 'other').toLowerCase();
+    if (!p.imageUrl) p.imageUrl = UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default;
+    return { ...p, id: row.id };
+  });
 }
 
 /**
@@ -469,14 +498,18 @@ vibeTags (array), price, link (real URL).`,
   const stripTags = (v) => typeof v === 'string' ? v.replace(/<[^>]+>/g, '').trim() : v;
 
   if (Array.isArray(parsed.events)) {
-    parsed.events = parsed.events.map(e => ({
-      ...e,
-      title:       stripTags(e.title),
-      description: stripTags(e.description),
-      location:    stripTags(e.location),
-      date:        stripTags(e.date),
-      price:       stripTags(e.price),
-    }));
+    parsed.events = parsed.events.map(e => {
+      const cat = (e.category || 'other').toLowerCase();
+      return {
+        ...e,
+        title:       stripTags(e.title),
+        description: stripTags(e.description),
+        location:    stripTags(e.location),
+        date:        stripTags(e.date),
+        price:       stripTags(e.price),
+        imageUrl:    e.imageUrl || UNSPLASH_FALLBACK[cat] || UNSPLASH_FALLBACK.default,
+      };
+    });
   }
   if (parsed.text) parsed.text = stripTags(parsed.text);
 
@@ -960,19 +993,7 @@ app.get('/api/events', async (_req, res) => {
     // Helper: strip any HTML/XML tags (e.g. <cite index="9-12"> from web_search)
     const stripTags = (v) => (typeof v === 'string') ? v.replace(/<[^>]+>/g, '').trim() : v;
 
-    // Unsplash fallback images by category — same map as Ravi's image_extractor.py
-    const UNSPLASH = {
-      music:    'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format',
-      art:      'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
-      arts:     'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
-      food:     'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800&fit=crop&auto=format',
-      outdoor:  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&fit=crop&auto=format',
-      comedy:   'https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=800&fit=crop&auto=format',
-      sports:   'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&fit=crop&auto=format',
-      wellness: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format',
-      party:    'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format',
-      default:  'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&fit=crop&auto=format',
-    };
+    const UNSPLASH = UNSPLASH_FALLBACK; // use module-level map
 
     const events = (data || []).map(row => {
       const p = row.payload || {};
