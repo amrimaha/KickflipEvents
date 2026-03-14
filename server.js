@@ -460,7 +460,27 @@ vibeTags (array), price, link (real URL).`,
 
   const match = finalText.match(/\{[\s\S]*\}/);
   if (!match) return { text: 'Scouting the Seattle scene...', events: [] };
-  try { return JSON.parse(match[0]); } catch { return { text: finalText.trim(), events: [] }; }
+
+  let parsed;
+  try { parsed = JSON.parse(match[0]); } catch { return { text: finalText.trim(), events: [] }; }
+
+  // Strip <cite index="...">...</cite> and any other XML/HTML tags that
+  // Claude's web_search tool injects into the response text.
+  const stripTags = (v) => typeof v === 'string' ? v.replace(/<[^>]+>/g, '').trim() : v;
+
+  if (Array.isArray(parsed.events)) {
+    parsed.events = parsed.events.map(e => ({
+      ...e,
+      title:       stripTags(e.title),
+      description: stripTags(e.description),
+      location:    stripTags(e.location),
+      date:        stripTags(e.date),
+      price:       stripTags(e.price),
+    }));
+  }
+  if (parsed.text) parsed.text = stripTags(parsed.text);
+
+  return parsed;
 }
 
 /** Store newly discovered events (from web search) back into Supabase with embeddings */
