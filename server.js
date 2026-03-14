@@ -62,6 +62,35 @@ if (pgPool) {
     );
     CREATE INDEX IF NOT EXISTS kickflip_saved_events_user_idx ON kickflip_saved_events (user_id);
   `).catch(e => console.warn('[pg:init] kickflip_saved_events table setup failed:', e.message));
+
+  // Auto-create chat scoring tables
+  pgPool.query(`
+    CREATE TABLE IF NOT EXISTS chat_conversations (
+      id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id          TEXT,
+      user_message     TEXT        NOT NULL,
+      ai_response      TEXT        NOT NULL DEFAULT '',
+      events_returned  JSONB,
+      source           TEXT,
+      similarity_score FLOAT,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS chat_conversations_created_idx ON chat_conversations (created_at DESC);
+    CREATE INDEX IF NOT EXISTS chat_conversations_user_idx    ON chat_conversations (user_id);
+
+    CREATE TABLE IF NOT EXISTS chat_scores (
+      id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      conversation_id  UUID        NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+      score_type       TEXT        NOT NULL,
+      score            TEXT        NOT NULL CHECK (score IN ('helpful','somewhat_helpful','not_helpful')),
+      score_reason     TEXT,
+      scored_by        TEXT,
+      scored_at        TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (conversation_id, score_type)
+    );
+    CREATE INDEX IF NOT EXISTS chat_scores_convo_idx  ON chat_scores (conversation_id);
+    CREATE INDEX IF NOT EXISTS chat_scores_scored_idx ON chat_scores (scored_at DESC);
+  `).catch(e => console.warn('[pg:init] chat scoring tables setup failed:', e.message));
 }
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] }));
@@ -575,6 +604,28 @@ async function storeDiscoveredEvents(events) {
   }
 }
 
+/** Save a chat interaction for scoring — non-blocking, fire-and-forget */
+async function saveConversation({ userId, query, aiText, events, source, similarityScore }) {
+  if (!pgPool) return;
+  try {
+    const pseudo = userId ? pseudonymize(String(userId)) : null;
+    await pgPool.query(
+      `INSERT INTO chat_conversations (user_id, user_message, ai_response, events_returned, source, similarity_score, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      [
+        pseudo,
+        query,
+        aiText || '',
+        JSON.stringify((events || []).slice(0, 10).map(e => ({ id: e.id, title: e.title, category: e.category }))),
+        source || null,
+        similarityScore || null,
+      ]
+    );
+  } catch (err) {
+    console.warn('[chat:save-convo] non-fatal:', err.message);
+  }
+}
+
 // ─── POST /api/chat — Main query endpoint ────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
@@ -600,6 +651,7 @@ app.post('/api/chat', async (req, res) => {
       console.log(`[chat:${reqId}] STEP 1 — cache HIT, returning cached result`);
       const events = await fetchEventsByIds(cached.event_ids);
       sendStreamResult(res, cached.result_text, events);
+      saveConversation({ userId: user_id, query, aiText: cached.result_text, events, source: 'cache' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'cache' });
       return;
     }
@@ -628,6 +680,7 @@ app.post('/api/chat', async (req, res) => {
       const rawEvents = (result.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
       await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
       sendStreamResult(res, result.text || 'Checking the local scene...', rawEvents);
+      saveConversation({ userId: user_id, query, aiText: result.text, events: rawEvents, source: 'chronological' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'chronological' });
       return;
     }
@@ -672,6 +725,7 @@ app.post('/api/chat', async (req, res) => {
         const totalMs = Date.now() - t0;
         console.log(`[chat:${reqId}] DONE (Option A) — ${rawEvents.length} events, ${totalMs}ms`);
         sendStreamResult(res, vibeText, rawEvents);
+        saveConversation({ userId: user_id, query, aiText: vibeText, events: rawEvents, source: `${responseSource}_fast`, similarityScore: topSimilarity }).catch(() => {});
         trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: `${responseSource}_fast` });
         return;
       }
@@ -681,6 +735,7 @@ app.post('/api/chat', async (req, res) => {
       // Cache will be saved after streaming completes — fire a deferred save
       const vibeForCache = buildVibeText(query, rawEvents); // placeholder; real vibe arrives after stream
       saveCache(queryHash, query, rawEvents.map(e => e.id), vibeForCache).catch(() => {});
+      saveConversation({ userId: user_id, query, aiText: vibeForCache, events: rawEvents, source: responseSource, similarityScore: topSimilarity }).catch(() => {});
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (Option B stream) — ${rawEvents.length} events, ${totalMs}ms`);
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
@@ -704,7 +759,9 @@ app.post('/api/chat', async (req, res) => {
       if (broadMatches.length >= 2) {
         const rawEvents = broadMatches.map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
         console.log(`[chat:${reqId}] STEP 5 — stream broad match (${rawEvents.length} events)`);
-        saveCache(queryHash, query, rawEvents.map(e => e.id), buildVibeText(query, rawEvents)).catch(() => {});
+        const broadVibeText = buildVibeText(query, rawEvents);
+        saveCache(queryHash, query, rawEvents.map(e => e.id), broadVibeText).catch(() => {});
+        saveConversation({ userId: user_id, query, aiText: broadVibeText, events: rawEvents, source: 'embedding' }).catch(() => {});
         const totalMs = Date.now() - t0;
         trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'embedding' });
         await streamVibeWithClaude(query, rawEvents, currentDateTime, res);
@@ -725,6 +782,7 @@ app.post('/api/chat', async (req, res) => {
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (websearch) — ${rawEvents.length} events, ${totalMs}ms`);
       sendStreamResult(res, wsResult.text || 'Scouting the Seattle scene...', rawEvents);
+      saveConversation({ userId: user_id, query, aiText: wsResult.text, events: rawEvents, source: 'websearch' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'websearch' });
       return;
     }
@@ -1406,6 +1464,125 @@ app.post('/api/chats/:chatId/sessions/:sessionId/messages', async (req, res) => 
     return res.status(201).json({ ok: true, stored: rows.length });
   } catch (err) {
     console.error('[chats/messages/store]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/score-chats — Daily LLM auto-scorer ───────────────────
+//
+// Fetches all unscored conversations from the last 48 h and asks Claude
+// to rate each as "helpful" | "somewhat_helpful" | "not_helpful".
+// Scores + reasons are stored in chat_scores.
+//
+// Run via Railway cron:  POST /api/score-chats  (daily at 2 am Seattle)
+// Or manually:           curl -X POST ... -H "Authorization: Bearer <CRON_SECRET>"
+//
+// Response:
+//   { scored, helpful, somewhat_helpful, not_helpful, helpfulness_pct, on_track }
+//   on_track = helpfulness_pct >= 90  (the team's target)
+
+app.post('/api/score-chats', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (!pgPool) {
+    return res.status(503).json({ error: 'DATABASE_URL not configured — chat scoring unavailable' });
+  }
+
+  try {
+    // Fetch up to 100 unscored conversations from the last 48 h
+    const { rows: convos } = await pgPool.query(`
+      SELECT c.id, c.user_message, c.ai_response, c.events_returned, c.source, c.similarity_score
+      FROM   chat_conversations c
+      WHERE  c.created_at > NOW() - INTERVAL '48 hours'
+        AND  NOT EXISTS (
+               SELECT 1 FROM chat_scores s
+               WHERE  s.conversation_id = c.id
+                 AND  s.score_type = 'llm_auto'
+             )
+      ORDER  BY c.created_at DESC
+      LIMIT  100
+    `);
+
+    if (convos.length === 0) {
+      return res.json({ scored: 0, message: 'No unscored conversations in the last 48 h' });
+    }
+
+    console.log(`[score-chats] Scoring ${convos.length} conversations`);
+
+    const SCORING_SYSTEM = `You score an AI event-discovery assistant. Return JSON only — no prose.
+Format: {"score": "helpful" | "somewhat_helpful" | "not_helpful", "reason": "one sentence"}
+
+Rubric:
+- "helpful": Events clearly match the user's query intent (right vibe, right city, relevant category/date)
+- "somewhat_helpful": Partially relevant — some events match but key criteria were missed (wrong category, wrong date, vague)
+- "not_helpful": Events do not match the query, wrong city, no events returned, or a generic error message`;
+
+    let scored = 0, helpful = 0, somewhat = 0, notHelpful = 0;
+
+    for (const convo of convos) {
+      try {
+        const eventsSnippet = JSON.stringify(convo.events_returned || []);
+        const msg = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 150,
+          system: SCORING_SYSTEM,
+          messages: [{
+            role: 'user',
+            content: `USER QUERY: "${convo.user_message}"
+AI RESPONSE TEXT: "${convo.ai_response}"
+EVENTS RETURNED: ${eventsSnippet}
+SEARCH METHOD: ${convo.source || 'unknown'}`,
+          }],
+        });
+
+        const raw = msg.content[0]?.text || '';
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) continue;
+
+        let parsed;
+        try { parsed = JSON.parse(match[0]); } catch { continue; }
+
+        const score = ['helpful', 'somewhat_helpful', 'not_helpful'].includes(parsed.score)
+          ? parsed.score : 'not_helpful';
+
+        await pgPool.query(
+          `INSERT INTO chat_scores
+             (conversation_id, score_type, score, score_reason, scored_by, scored_at)
+           VALUES ($1, 'llm_auto', $2, $3, $4, NOW())
+           ON CONFLICT (conversation_id, score_type)
+           DO UPDATE SET score        = EXCLUDED.score,
+                         score_reason = EXCLUDED.score_reason,
+                         scored_at    = NOW()`,
+          [convo.id, score, parsed.reason || null, 'claude-haiku-4-5-20251001']
+        );
+
+        scored++;
+        if      (score === 'helpful')           helpful++;
+        else if (score === 'somewhat_helpful')  somewhat++;
+        else                                    notHelpful++;
+
+      } catch (err) {
+        console.warn(`[score-chats] failed on convo ${convo.id}:`, err.message);
+      }
+    }
+
+    const helpfulnessPct = scored > 0 ? Math.round(100 * helpful / scored) : 0;
+    console.log(`[score-chats] Done — ${scored} scored, ${helpfulnessPct}% helpful`);
+
+    return res.json({
+      scored,
+      helpful,
+      somewhat_helpful: somewhat,
+      not_helpful:      notHelpful,
+      helpfulness_pct:  helpfulnessPct,
+      target_pct:       90,
+      on_track:         helpfulnessPct >= 90,
+    });
+
+  } catch (err) {
+    console.error('[score-chats] error:', err);
     return res.status(500).json({ error: err.message });
   }
 });
