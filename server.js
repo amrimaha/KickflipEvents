@@ -957,11 +957,37 @@ app.get('/api/events', async (_req, res) => {
     // Helper: reject placeholder / null-ish string values
     const realStr = (v) => (v && typeof v === 'string' && !/^(\$?null|tbd|n\/a|unknown|undefined)$/i.test(v.trim()) && v.trim() !== '') ? v.trim() : null;
 
+    // Helper: strip any HTML/XML tags (e.g. <cite index="9-12"> from web_search)
+    const stripTags = (v) => (typeof v === 'string') ? v.replace(/<[^>]+>/g, '').trim() : v;
+
+    // Unsplash fallback images by category — same map as Ravi's image_extractor.py
+    const UNSPLASH = {
+      music:    'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format',
+      art:      'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
+      arts:     'https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format',
+      food:     'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800&fit=crop&auto=format',
+      outdoor:  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&fit=crop&auto=format',
+      comedy:   'https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=800&fit=crop&auto=format',
+      sports:   'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&fit=crop&auto=format',
+      wellness: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format',
+      party:    'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format',
+      default:  'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&fit=crop&auto=format',
+    };
+
     const events = (data || []).map(row => {
       const p = row.payload || {};
 
-      // ── Image ────────────────────────────────────────────────────────────
-      const imageUrl = row.image_url || p.imageUrl || null;
+      // ── Category (needed before image fallback) ───────────────────────────
+      let category = p.category;
+      if (!category) {
+        const cats = typeof row.categories === 'string' ? JSON.parse(row.categories || '[]') : (row.categories || []);
+        if (Array.isArray(cats) && cats.length > 0) category = cats[0].toLowerCase();
+      }
+      category = category || 'other';
+
+      // ── Image — DB column → payload → Unsplash fallback by category ───────
+      const imageUrl = row.image_url || p.imageUrl
+        || UNSPLASH[category] || UNSPLASH.default;
 
       // ── Price — filter "$NULL", "null", "TBD", empty ─────────────────────
       const price = realStr(p.price ?? row.price) || undefined;
@@ -974,14 +1000,6 @@ app.get('/api/events', async (_req, res) => {
 
       // ── CTA link ─────────────────────────────────────────────────────────
       const link = p.link || row.ticket_url || row.source_url || null;
-
-      // ── Category ─────────────────────────────────────────────────────────
-      let category = p.category;
-      if (!category) {
-        const cats = typeof row.categories === 'string' ? JSON.parse(row.categories || '[]') : (row.categories || []);
-        if (Array.isArray(cats) && cats.length > 0) category = cats[0].toLowerCase();
-      }
-      category = category || 'other';
 
       // ── Date / time — from payload strings or start_time timestamp ────────
       let startDate = p.startDate;
@@ -998,8 +1016,8 @@ app.get('/api/events', async (_req, res) => {
         || (typeof row.vibe_tags === 'string' ? JSON.parse(row.vibe_tags || '[]') : (row.vibe_tags || []))
         || [];
 
-      // ── Text fields ──────────────────────────────────────────────────────
-      const description = p.description || p.vibeDescription || row.event_summary || row.description || '';
+      // ── Text fields — strip any lingering <cite> tags from web_search ───────
+      const description = stripTags(p.description || p.vibeDescription || row.event_summary || row.description || '');
       const crawlSource = p.crawlSource || row.source_name || null;
       const organizer = p.organizer || null;
       const city = p.city || row.city || 'Seattle';
@@ -1009,7 +1027,7 @@ app.get('/api/events', async (_req, res) => {
 
       return {
         id:           row.id,
-        title:        p.title || row.title || '',
+        title:        stripTags(p.title || row.title || ''),
         category,
         price,
         imageUrl,
