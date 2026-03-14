@@ -278,7 +278,7 @@ export const EventCard: React.FC<EventCardProps> = ({
       extras: { cta_label: label },
     });
   };
-  let ctaAction = () => { fireCta(ctaText); window.open(event.link, '_blank'); };
+  let ctaAction = () => { fireCta(ctaText); if (event.link) window.open(event.link, '_blank'); };
 
   if (isNative && onBook) {
       // Native Kickflip Event -> Internal Checkout
@@ -558,27 +558,30 @@ export const EventCard: React.FC<EventCardProps> = ({
                     </div>
                 )}
 
+                {/* Map — only render when we have a meaningful location to query */}
+                {(event.address || displayLocation) && (
                 <div className="w-full h-64 rounded-xl overflow-hidden border border-white/10 bg-white/5 relative group flex-shrink-0 mt-4">
-                    <iframe 
-                        width="100%" 
-                        height="100%" 
-                        frameBorder="0" 
-                        style={{ border: 0, filter: 'invert(90%) hue-rotate(180deg)' }} 
-                        src={`https://www.google.com/maps?q=${encodeURIComponent(event.address || displayLocation)}&output=embed&z=14`}
+                    <iframe
+                        width="100%"
+                        height="100%"
+                        frameBorder="0"
+                        style={{ border: 0, filter: 'invert(90%) hue-rotate(180deg)' }}
+                        src={`https://www.google.com/maps?q=${encodeURIComponent(event.address || (displayLocation + (event.city ? `, ${event.city}` : ', Seattle, WA')))}&output=embed&z=14`}
                         allowFullScreen
                         loading="lazy"
                         className="opacity-60 group-hover:opacity-100 transition-opacity"
                     ></iframe>
-                    
+
                     <div className="absolute top-4 left-4 right-4 z-10 pointer-events-none">
                         <div className="inline-block bg-black/80 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-lg">
-                            <p className="text-sm font-bold text-white leading-tight">{displayLocation}</p>
+                            <p className="text-sm font-bold text-white leading-tight">{displayLocation || event.city || 'Seattle'}</p>
                             {event.address && (
                                 <p className="text-xs text-white/60 mt-0.5">{event.address}</p>
                             )}
                         </div>
                     </div>
                 </div>
+                )}
 
                 {/* Footer / CTA Area */}
                 <div className="pt-6 mt-auto">

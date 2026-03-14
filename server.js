@@ -922,21 +922,93 @@ app.post('/api/admin/metrics/snapshot', async (req, res) => {
 app.get('/api/events', async (_req, res) => {
   try {
     const now = new Date().toISOString();
+    // Select both the legacy payload blob (Node.js crawler) AND individual
+    // columns (Ravi's Python crawler).  Events from either crawler are
+    // normalized below into the same KickflipEvent shape.
     const { data, error } = await supabase
       .from('kickflip_events')
-      .select('id, payload, image_url, start_time')
+      .select('id, payload, image_url, start_time, title, venue, address, city, price, is_free, ticket_url, source_url, source_name, categories, event_summary, description, vibe_tags, origin')
       .or(`expires_at.is.null,expires_at.gt.${now}`)
       .order('start_time', { ascending: true, nullsFirst: false })
       .limit(150);
 
     if (error) throw new Error(error.message);
 
-    const events = (data || []).map(row => ({
-      id: row.id,
-      ...(row.payload || {}),
-      // Prefer the dedicated image_url column (written by enrichImages)
-      imageUrl: row.image_url || (row.payload || {}).imageUrl || null,
-    }));
+    // Helper: reject placeholder / null-ish string values
+    const realStr = (v) => (v && typeof v === 'string' && !/^(\$?null|tbd|n\/a|unknown|undefined)$/i.test(v.trim()) && v.trim() !== '') ? v.trim() : null;
+
+    const events = (data || []).map(row => {
+      const p = row.payload || {};
+
+      // ── Image ────────────────────────────────────────────────────────────
+      const imageUrl = row.image_url || p.imageUrl || null;
+
+      // ── Price — filter "$NULL", "null", "TBD", empty ─────────────────────
+      const price = realStr(p.price ?? row.price) || undefined;
+
+      // ── Venue / location ─────────────────────────────────────────────────
+      const locationName = realStr(p.locationName) || realStr(p.location) || realStr(row.venue) || null;
+
+      // ── Address — filter "TBD" so the map doesn't query that literal string
+      const address = realStr(p.address) || realStr(row.address) || null;
+
+      // ── CTA link ─────────────────────────────────────────────────────────
+      const link = p.link || row.ticket_url || row.source_url || null;
+
+      // ── Category ─────────────────────────────────────────────────────────
+      let category = p.category;
+      if (!category) {
+        const cats = typeof row.categories === 'string' ? JSON.parse(row.categories || '[]') : (row.categories || []);
+        if (Array.isArray(cats) && cats.length > 0) category = cats[0].toLowerCase();
+      }
+      category = category || 'other';
+
+      // ── Date / time — from payload strings or start_time timestamp ────────
+      let startDate = p.startDate;
+      let startTime = p.startTime;
+      if (!startDate && row.start_time) {
+        const dt = new Date(row.start_time);
+        startDate = dt.toISOString().split('T')[0];
+        // HH:MM in local-ish format (good enough for display)
+        startTime = dt.toTimeString().slice(0, 5);
+      }
+
+      // ── Vibe tags ────────────────────────────────────────────────────────
+      const vibeTags = p.vibeTags
+        || (typeof row.vibe_tags === 'string' ? JSON.parse(row.vibe_tags || '[]') : (row.vibe_tags || []))
+        || [];
+
+      // ── Text fields ──────────────────────────────────────────────────────
+      const description = p.description || p.vibeDescription || row.event_summary || row.description || '';
+      const crawlSource = p.crawlSource || row.source_name || null;
+      const organizer = p.organizer || null;
+      const city = p.city || row.city || 'Seattle';
+
+      // ── Origin — normalize to 'crawl' so EventCard CTA logic fires ───────
+      const origin = (p.origin === 'user') ? 'user' : 'crawl';
+
+      return {
+        id:           row.id,
+        title:        p.title || row.title || '',
+        category,
+        price,
+        imageUrl,
+        link,
+        startDate,
+        startTime,
+        date:         p.date || startDate || '',
+        location:     locationName || city,
+        locationName,
+        address,
+        city,
+        description,
+        vibeTags,
+        organizer,
+        crawlSource,
+        origin,
+        overview:     p.overview || null,
+      };
+    });
 
     res.json({ events });
   } catch (err) {
