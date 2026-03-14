@@ -283,6 +283,14 @@ async def run_once() -> int:
         except Exception as exc:
             log.warning(f"embed_pending_events failed: {exc}")
 
+        try:
+            from app.parsers.tagger import tag_pending_events
+            tagged = await tag_pending_events(db_pool)
+            if tagged:
+                log.info(f"Post-crawl tagging: {tagged} event(s) tagged with vibe_tags")
+        except Exception as exc:
+            log.warning(f"tag_pending_events failed: {exc}")
+
         if db_run_id:
             try:
                 await database.finish_batch_run(db_run_id, run_id, summary, db_pool)
