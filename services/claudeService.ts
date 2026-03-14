@@ -3,35 +3,68 @@ import { KickflipEvent } from "../types";
 import { FEATURED_EVENTS, getVideoForEvent } from "../constants";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const STREAM_DELIMITER = '\n\n[EVENTS_JSON]\n';
 
-async function fetchWithRetry(url: string, body: object, retries = 3): Promise<any> {
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (error: any) {
-    if (retries > 0) {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      return fetchWithRetry(url, body, retries - 1);
-    }
-    throw error;
+/**
+ * Reads the streaming `/api/chat` response.
+ * Calls `onChunk(partialText)` as vibe text arrives token by token.
+ * Returns `{ text, events }` once the delimiter appears and stream ends.
+ */
+async function fetchChatStream(
+  url: string,
+  body: object,
+  onChunk?: (partial: string) => void
+): Promise<{ text: string; events: any[] }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  // JSON fallback (e.g. 500 error returned before streaming started)
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await res.json();
+    return { text: data.text || '', events: data.events || [] };
   }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    accumulated += decoder.decode(value, { stream: true });
+
+    // Fire onChunk with the vibe text portion as it streams in
+    if (onChunk) {
+      const delimIdx = accumulated.indexOf(STREAM_DELIMITER);
+      const vibeText = delimIdx === -1 ? accumulated : accumulated.slice(0, delimIdx);
+      onChunk(vibeText);
+    }
+  }
+
+  const delimIdx = accumulated.indexOf(STREAM_DELIMITER);
+  if (delimIdx === -1) return { text: accumulated.trim(), events: [] };
+
+  const vibeText = accumulated.slice(0, delimIdx).trim();
+  const eventsJson = accumulated.slice(delimIdx + STREAM_DELIMITER.length);
+  let events: any[] = [];
+  try { events = JSON.parse(eventsJson); } catch { events = []; }
+  return { text: vibeText, events };
 }
 
 export const searchSeattleEvents = async (
   query: string,
-  systemEvents: KickflipEvent[] = []
+  systemEvents: KickflipEvent[] = [],
+  onChunk?: (partial: string) => void
 ): Promise<{ text: string; events: KickflipEvent[] }> => {
   try {
     const registrySource = systemEvents.length > 0 ? systemEvents : FEATURED_EVENTS;
 
-    const data = await fetchWithRetry(`${API_URL}/api/chat`, {
-      query,
-    });
+    const data = await fetchChatStream(`${API_URL}/api/chat`, { query }, onChunk);
 
     const rawEvents: KickflipEvent[] = (data.events || []).map((e: any, index: number) => {
       const existingRecord = registrySource.find(r =>

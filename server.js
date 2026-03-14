@@ -356,6 +356,52 @@ Respond with valid JSON: {"text": "...", "events": [...]}`,
   }
 }
 
+// ─── Option A helper: template vibe text (no Claude call) ────────────
+function buildVibeText(query, events) {
+  const cats = [...new Set(events.slice(0, 3).map(e => e.category).filter(Boolean))];
+  if (cats.length === 1) return `Top ${cats[0]} picks in Seattle.`;
+  if (cats.length === 2) return `${cats[0]} & ${cats[1]} vibes in Seattle.`;
+  return `${events.length} events matching your vibe in Seattle.`;
+}
+
+// ─── Option B helper: stream Claude vibe text → append events JSON ────
+async function streamVibeWithClaude(query, events, _currentDateTime, res) {
+  if (!res.headersSent) {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no');
+  }
+  const snippets = events.slice(0, 5).map(e => ({
+    title: e.title, category: e.category,
+    date: e.date || e.startDate, location: e.locationName || e.location,
+  }));
+  const stream = anthropic.messages.stream({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 60,
+    system: `You are Kickflip, Seattle's event guide. Reply in 1 sentence, max 12 words. Capture the vibe. No JSON.`,
+    messages: [{ role: 'user', content: `Query: "${query}"\nTop matches: ${JSON.stringify(snippets)}` }],
+  });
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      res.write(event.delta.text);
+    }
+  }
+  res.write('\n\n[EVENTS_JSON]\n');
+  res.write(JSON.stringify(events));
+  res.end();
+}
+
+// ─── Shared stream sender (for cache hits, web search, errors) ────────
+function sendStreamResult(res, text, events) {
+  if (!res.headersSent) {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no'); // prevent Railway/Nginx from buffering
+  }
+  res.write(text || '');
+  res.write('\n\n[EVENTS_JSON]\n');
+  res.write(JSON.stringify(events || []));
+  res.end();
+}
+
 // ─── Claude web_search fallback (live discovery) ──────────────────────
 
 async function discoverWithWebSearch(query, currentDateTime) {
@@ -467,7 +513,7 @@ app.post('/api/chat', async (req, res) => {
     if (cached) {
       console.log(`[chat:${reqId}] STEP 1 — cache HIT, returning cached result`);
       const events = await fetchEventsByIds(cached.event_ids);
-      res.json({ text: cached.result_text, events, source: 'cache' });
+      sendStreamResult(res, cached.result_text, events);
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'cache' });
       return;
     }
@@ -495,7 +541,7 @@ app.post('/api/chat', async (req, res) => {
         : await discoverWithWebSearch(query, currentDateTime);
       const rawEvents = (result.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
       await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
-      res.json({ text: result.text || 'Checking the local scene...', events: rawEvents });
+      sendStreamResult(res, result.text || 'Checking the local scene...', rawEvents);
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'chronological' });
       return;
     }
@@ -526,13 +572,34 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    let result;
+    const topSimilarity = matchedEvents[0]?.similarity ?? 0;
 
     if (matchedEvents.length >= 3) {
-      // ── ④b Good match — Claude formats top results ──────────────────
-      console.log(`[chat:${reqId}] STEP 5 — formatWithClaude (${matchedEvents.length} events)`);
-      result = await formatWithClaude(query, matchedEvents, currentDateTime);
-      console.log(`[chat:${reqId}] STEP 5 — formatWithClaude OK`);
+      const rawEvents = matchedEvents.map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
+      const responseSource = usedFreeRetry ? 'semantic_nofree' : 'semantic';
+
+      if (topSimilarity >= 0.80) {
+        // ── Option A: High-confidence — skip Claude entirely (~1.5s saved) ─
+        console.log(`[chat:${reqId}] STEP 5 — Option A: skip Claude (similarity=${topSimilarity.toFixed(2)})`);
+        const vibeText = buildVibeText(query, rawEvents);
+        await saveCache(queryHash, query, rawEvents.map(e => e.id), vibeText);
+        const totalMs = Date.now() - t0;
+        console.log(`[chat:${reqId}] DONE (Option A) — ${rawEvents.length} events, ${totalMs}ms`);
+        sendStreamResult(res, vibeText, rawEvents);
+        trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: `${responseSource}_fast` });
+        return;
+      }
+
+      // ── Option B: Good match — stream Claude vibe text, then events ─
+      console.log(`[chat:${reqId}] STEP 5 — Option B: stream Claude vibe (similarity=${topSimilarity.toFixed(2)})`);
+      // Cache will be saved after streaming completes — fire a deferred save
+      const vibeForCache = buildVibeText(query, rawEvents); // placeholder; real vibe arrives after stream
+      saveCache(queryHash, query, rawEvents.map(e => e.id), vibeForCache).catch(() => {});
+      const totalMs = Date.now() - t0;
+      console.log(`[chat:${reqId}] DONE (Option B stream) — ${rawEvents.length} events, ${totalMs}ms`);
+      trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
+      await streamVibeWithClaude(query, rawEvents, currentDateTime, res);
+      return;
 
     } else {
       // ── ④c Low confidence — try lower threshold ─────────────────────
@@ -549,55 +616,43 @@ app.post('/api/chat', async (req, res) => {
       }
 
       if (broadMatches.length >= 2) {
-        console.log(`[chat:${reqId}] STEP 5 — formatWithClaude broad match (${broadMatches.length} events)`);
-        result = await formatWithClaude(query, broadMatches, currentDateTime);
-        console.log(`[chat:${reqId}] STEP 5 — formatWithClaude OK`);
-      } else {
-        // ── ④d Live web search fallback ───────────────────────────────
-        console.log(`[chat:${reqId}] STEP 5 — no DB match, triggering web search`);
-        result = await discoverWithWebSearch(query, currentDateTime);
-        console.log(`[chat:${reqId}] STEP 5 — web search returned ${result?.events?.length ?? 0} events`);
-
-        // Store discovered events in background (non-blocking)
-        if (result.events && result.events.length > 0) {
-          storeDiscoveredEvents(result.events).catch(err =>
-            console.warn(`[chat:${reqId}] background store error (non-fatal):`, err.message)
-          );
-        }
+        const rawEvents = broadMatches.map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
+        console.log(`[chat:${reqId}] STEP 5 — stream broad match (${rawEvents.length} events)`);
+        saveCache(queryHash, query, rawEvents.map(e => e.id), buildVibeText(query, rawEvents)).catch(() => {});
+        const totalMs = Date.now() - t0;
+        trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'embedding' });
+        await streamVibeWithClaude(query, rawEvents, currentDateTime, res);
+        return;
       }
+
+      // ── ④d Live web search fallback ───────────────────────────────
+      console.log(`[chat:${reqId}] STEP 5 — no DB match, triggering web search`);
+      const wsResult = await discoverWithWebSearch(query, currentDateTime);
+      console.log(`[chat:${reqId}] STEP 5 — web search returned ${wsResult?.events?.length ?? 0} events`);
+      const rawEvents = (wsResult.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
+      if (rawEvents.length > 0) {
+        storeDiscoveredEvents(rawEvents).catch(err =>
+          console.warn(`[chat:${reqId}] background store error (non-fatal):`, err.message)
+        );
+      }
+      await saveCache(queryHash, query, rawEvents.map(e => e.id), wsResult.text || '');
+      const totalMs = Date.now() - t0;
+      console.log(`[chat:${reqId}] DONE (websearch) — ${rawEvents.length} events, ${totalMs}ms`);
+      sendStreamResult(res, wsResult.text || 'Scouting the Seattle scene...', rawEvents);
+      trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'websearch' });
+      return;
     }
-
-    // Normalise event objects returned by Claude
-    const rawEvents = (result.events || []).map((e, index) => {
-      if (!e.id) e.id = `result-${Date.now()}-${index}`;
-      return e;
-    });
-
-    // Determine source label for analytics
-    const responseSource = matchedEvents?.length >= 3 ? 'claude'
-      : (usedFreeRetry ? 'semantic_nofree' : matchedEvents?.length >= 2 ? 'embedding' : 'websearch');
-
-    // ── Save to cache ─────────────────────────────────────────────────
-    await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
-
-    const totalMs = Date.now() - t0;
-    console.log(`[chat:${reqId}] DONE — ${rawEvents.length} events, source=${responseSource}, ${totalMs}ms`);
-
-    res.json({
-      text: result.text || 'Checking the local scene...',
-      events: rawEvents,
-    });
-    trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
 
   } catch (error) {
     const totalMs = Date.now() - t0;
     console.error(`[chat:${reqId}] FATAL ERROR after ${totalMs}ms — ${error?.constructor?.name}: ${error?.message}`);
     console.error(`[chat:${reqId}] Stack:`, error?.stack);
-    res.status(500).json({
-      error: 'AI service unavailable',
-      text: 'Connection bumpy. Try again?',
-      events: [],
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'AI service unavailable', text: 'Connection bumpy. Try again?', events: [] });
+    } else {
+      // Stream already started — write error as stream and close cleanly
+      try { sendStreamResult(res, 'Connection bumpy. Try again?', []); } catch (_) {}
+    }
     trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 500, source: null });
   }
 });

@@ -971,20 +971,35 @@ const App: React.FC = () => {
     setLoadingState(LoadingState.SEARCHING);
     setCurrentEvents([]);
 
+    // Add a streaming placeholder so the user sees text arriving live
+    setMessages(prev => [...prev, { role: 'model', text: '' }]);
+
     try {
-      const result = await searchSeattleEvents(text, allActiveEvents);
-      const modelMsg: ChatMessage = {
-        role: 'model',
-        text: result.text,
-        events: result.events
-      };
-      setMessages(prev => [...prev, modelMsg]);
+      const result = await searchSeattleEvents(
+        text,
+        allActiveEvents,
+        (partial) => {
+          // Update the placeholder message as vibe text streams in
+          if (partial.trim()) {
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { role: 'model', text: partial };
+              return copy;
+            });
+            setLoadingState(LoadingState.COMPLETE);
+          }
+        }
+      );
+      // Replace placeholder with final message (includes events)
+      setMessages(prev => [
+        ...prev.slice(0, -1),
+        { role: 'model', text: result.text, events: result.events },
+      ]);
       setCurrentEvents(result.events);
       setLoadingState(LoadingState.COMPLETE);
-      // Persist to backend (fire-and-forget) — only for logged-in users
       persistChatTurn(text, result);
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'model', text: "My bad, I tripped up finding that. Try again?" }]);
+      setMessages(prev => [...prev.slice(0, -1), { role: 'model', text: "My bad, I tripped up finding that. Try again?" }]);
       setLoadingState(LoadingState.ERROR);
     }
   };

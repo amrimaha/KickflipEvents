@@ -2,8 +2,20 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { KickflipEvent, ThemeConfig } from '../types';
-import { getVideoForEvent, CATEGORY_COLORS } from '../constants';
+import { CATEGORY_COLORS } from '../constants';
 import { trackClick } from '../services/trackClick';
+
+const CATEGORY_GRADIENTS: Record<string, string> = {
+  music:    'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+  food:     'linear-gradient(135deg, #d97706 0%, #dc2626 100%)',
+  arts:     'linear-gradient(135deg, #0891b2 0%, #7c3aed 100%)',
+  outdoor:  'linear-gradient(135deg, #16a34a 0%, #065f46 100%)',
+  comedy:   'linear-gradient(135deg, #d97706 0%, #ea580c 100%)',
+  wellness: 'linear-gradient(135deg, #0d9488 0%, #0891b2 100%)',
+  sports:   'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)',
+  party:    'linear-gradient(135deg, #db2777 0%, #9333ea 100%)',
+  other:    'linear-gradient(135deg, #374151 0%, #1f2937 100%)',
+};
 
 interface EventCardProps {
   event: KickflipEvent;
@@ -39,6 +51,7 @@ export const EventCard: React.FC<EventCardProps> = ({
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [failedVideos, setFailedVideos] = useState<Set<string>>(new Set());
+  const [mediaAllFailed, setMediaAllFailed] = useState(false);
 
   // Saved state — full payload stored in localStorage so profile works offline/without API
   const savedKey = `kickflip_saved_${event.id}`;
@@ -125,9 +138,8 @@ export const EventCard: React.FC<EventCardProps> = ({
     if (event.imageUrl) {
        return [{ src: event.imageUrl, type: 'image' as const, url: event.imageUrl }];
     }
-    // 4. Fallback Category Video
-    const fallback = getVideoForEvent(event.category, event.id);
-    return [{ src: fallback, type: 'video' as const, url: fallback }];
+    // 4. Category gradient fallback — no video/image available
+    return [{ src: '', type: 'gradient' as const, url: '' }];
   }, [event]);
 
   const mediaList = useMemo(() => resolveMediaList(), [resolveMediaList]);
@@ -138,6 +150,7 @@ export const EventCard: React.FC<EventCardProps> = ({
   useEffect(() => {
       setCurrentIndex(0);
       setFailedVideos(new Set());
+      setMediaAllFailed(false);
   }, [mediaList.length, event.id]);
 
   useEffect(() => {
@@ -359,17 +372,32 @@ export const EventCard: React.FC<EventCardProps> = ({
       const item = mediaList[currentIndex];
       const commonClasses = "w-full h-full object-cover transition-opacity duration-300";
       const isFailed = failedVideos.has(item.url);
-      
+
+      // Gradient fallback — shown when no media available or all media has failed
+      if (item.type === 'gradient' || mediaAllFailed) {
+         const gradient = CATEGORY_GRADIENTS[(event.category || '').toLowerCase()] ?? CATEGORY_GRADIENTS.other;
+         return (
+            <div
+               className="w-full h-full flex items-end p-4"
+               style={{ background: gradient }}
+               onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+            >
+               <span className="text-xs font-semibold uppercase tracking-widest opacity-60 text-white">
+                  {event.category}
+               </span>
+            </div>
+         );
+      }
+
       if (item.type === 'image' || isFailed) {
+         const imgSrc = item.type === 'image' ? item.url : (event.imageUrl || '');
          return (
             <div className="w-full h-full relative bg-gray-900" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
-              <img 
-                 src={item.type === 'image' ? item.url : (event.imageUrl || 'https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg')} 
+              <img
+                 src={imgSrc}
                  className={commonClasses}
                  alt={event.title}
-                 onError={(e) => {
-                     e.currentTarget.src = 'https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg';
-                 }}
+                 onError={() => setMediaAllFailed(true)}
               />
             </div>
          );

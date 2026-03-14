@@ -139,6 +139,31 @@ function makeDedupKey(event) {
   return `${title}__${date}`;
 }
 
+/**
+ * Levenshtein edit distance — O(m·n), space-optimised to O(n).
+ * Used for fuzzy title dedup: catches the same event listed by two
+ * scrapers with slightly different titles, e.g.:
+ *   "John Mulaney Live"  vs  "John Mulaney – Live at Paramount"
+ */
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const temp = row[j];
+      row[j] = a[i - 1] === b[j - 1]
+        ? prev
+        : 1 + Math.min(prev, row[j], row[j - 1]);
+      prev = temp;
+    }
+  }
+  return row[b.length];
+}
+
 // ─── Normalize event fields ───────────────────────────────────────────────────
 
 function normalizeEvent(raw, sourceName) {
@@ -355,6 +380,172 @@ Return [] if nothing found. Only real events with real URLs.`,
   }
 }
 
+// ─── OG image enrichment (Bryce's approach — $0 Claude cost) ─────────────────
+//
+// For newly stored events that have no imageUrl, fetch their source_url and
+// extract the og:image / twitter:image meta tag. Regex-only, no Claude.
+// 300ms delay between fetches to avoid hammering source sites.
+
+const OG_PATTERNS = [
+  /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+  /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+  /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+  /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+];
+
+function extractOgImage(html) {
+  for (const pattern of OG_PATTERNS) {
+    const match = html.match(pattern);
+    const url = match?.[1];
+    if (url && url.startsWith('http') && !url.startsWith('data:')) return url;
+  }
+  return null;
+}
+
+async function enrichImages(events, limit = 40) {
+  // Only enrich events that were newly stored (have a source_url, no imageUrl)
+  const needsImage = events
+    .filter(e => e.link && !e.imageUrl)
+    .slice(0, limit);
+
+  if (needsImage.length === 0) return 0;
+  console.log(`\n🖼️  IMAGE ENRICHMENT: fetching og:image for ${needsImage.length} events...`);
+
+  let enriched = 0;
+  for (const event of needsImage) {
+    try {
+      const res = await fetch(event.link, {
+        headers: { 'User-Agent': 'KickflipBot/2.0 (+https://kickflip-events.vercel.app)' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+
+      // Only read enough HTML to find the <head> og tags (first 10KB is plenty)
+      const html = (await res.text()).slice(0, 15000);
+      const imageUrl = extractOgImage(html);
+      if (!imageUrl) continue;
+
+      // Update payload.imageUrl in Supabase
+      const { data: existing } = await supabase
+        .from('kickflip_events')
+        .select('id, payload')
+        .eq('source_url', event.link)
+        .single();
+
+      if (existing) {
+        const updatedPayload = { ...existing.payload, imageUrl };
+        await supabase
+          .from('kickflip_events')
+          .update({ payload: updatedPayload })
+          .eq('id', existing.id);
+        enriched++;
+      }
+    } catch {
+      // Non-fatal — image enrichment is best-effort
+    }
+    await SLEEP(300);
+  }
+
+  console.log(`  ✅ Enriched ${enriched}/${needsImage.length} events with og:image`);
+  return enriched;
+}
+
+// ─── AI Tagging (Bryce's batch pattern — cheap, big quality win) ─────────────
+//
+// After upsert, run Claude Haiku in batches of 10 to enrich events with:
+//   vibeTags : adventurous | relaxing | social | educational |
+//              family-friendly | romantic | creative | cultural
+//   tags     : 3–5 specific descriptors ("date-night","outdoor","21+")
+//   price_tier: free | low | medium | premium | unknown
+//
+// Results are merged back into payload so the frontend can use them
+// immediately (vibeTags already rendered by EventCard).
+
+async function tagBatch(events) {
+  const prompt = events
+    .map((e, i) =>
+      `Event ${i + 1} (id: ${e.id}):\nTitle: ${e.title}\nDescription: ${(e.description || '').slice(0, 300)}\nCategory: ${e.category}\nPrice: ${e.price || 'unknown'}`
+    )
+    .join('\n\n');
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `For each event below return a JSON array. ONLY valid JSON, no markdown.
+Schema: [{"id":"string","tags":["string"],"vibe":["string"],"price_tier":"free|low|medium|premium|unknown"}]
+
+tags: 3–5 descriptors e.g. ["date-night","outdoor","21+","beginner-friendly","limited-capacity"]
+vibe: 1–3 from [adventurous, relaxing, social, educational, family-friendly, romantic, creative, cultural]
+price_tier: free=no cost, low=under $20, medium=$20–60, premium=over $60
+
+${prompt}`,
+      }],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) return new Map();
+
+    let parsed;
+    try { parsed = JSON.parse(match[0]); }
+    catch { parsed = JSON.parse(jsonrepair(match[0])); }
+
+    const results = new Map();
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (!item.id) continue;
+        results.set(String(item.id), {
+          tags:       Array.isArray(item.tags) ? item.tags : [],
+          vibeTags:   Array.isArray(item.vibe) ? item.vibe : [],  // frontend field name
+          price_tier: item.price_tier || 'unknown',
+        });
+      }
+    }
+    return results;
+  } catch (err) {
+    console.warn(`  ⚠️  [tagging] batch failed: ${err.message}`);
+    return new Map();
+  }
+}
+
+async function runTagging(events) {
+  if (events.length === 0) return 0;
+
+  // Chunk into batches of 10
+  const batches = [];
+  for (let i = 0; i < events.length; i += 10) batches.push(events.slice(i, i + 10));
+
+  console.log(`\n🏷️  TAGGING: ${events.length} events in ${batches.length} batches...`);
+  let tagged = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    const results = await tagBatch(batches[i]);
+
+    for (const [id, data] of results.entries()) {
+      // The event object IS the payload (stored as payload: event in upsertEvents),
+      // so merging data into it builds the updated payload directly — no extra SELECT needed.
+      const event = events.find(e => e.id === id);
+      if (!event) continue;
+
+      const { error } = await supabase
+        .from('kickflip_events')
+        .update({ payload: { ...event, ...data } })
+        .eq('id', id);
+
+      if (!error) tagged++;
+    }
+
+    if (i < batches.length - 1) await SLEEP(1000);
+  }
+
+  console.log(`  ✅ Tagged ${tagged}/${events.length} events`);
+  return tagged;
+}
+
 // ─── Upsert with embeddings ───────────────────────────────────────────────────
 
 async function upsertEvents(events, vectors, windowEnd) {
@@ -470,16 +661,51 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
   const htmlCount = allCandidates.length - rssCount;
   console.log(`  → ${htmlCount} from HTML, ${rssCount} from RSS, ${allCandidates.length} total`);
 
-  // ── Normalize + Deduplicate ────────────────────────────────────────────────
+  // ── Normalize + Deduplicate (3 passes) ────────────────────────────────────
   console.log('\n🔄 NORMALIZE + DEDUPLICATE...');
+
+  // Pass 1 — URL exact match (fastest, most reliable signal)
+  const seenUrls = new Set();
+  let urlDups = 0;
+  const urlDeduped = allCandidates.filter(e => {
+    if (!e.link) return true;
+    if (seenUrls.has(e.link)) { urlDups++; return false; }
+    seenUrls.add(e.link);
+    return true;
+  });
+
+  // Pass 2 — Title+date hash (same title, same date = same event)
+  // `seen` is kept in outer scope so gap-fill can also check against it
   const seen = new Map();
-  const unique = allCandidates.filter(e => {
+  let hashDups = 0;
+  const hashDeduped = urlDeduped.filter(e => {
     const key = makeDedupKey(e);
-    if (seen.has(key)) return false;
+    if (seen.has(key)) { hashDups++; return false; }
     seen.set(key, true);
     return true;
   });
-  console.log(`  → ${unique.length} unique (removed ${allCandidates.length - unique.length} duplicates)`);
+
+  // Pass 3 — Fuzzy title match (Levenshtein ≤ 8 on same date)
+  // Catches "John Mulaney Live" vs "John Mulaney – Live at Paramount" same night
+  const accepted = [];
+  let fuzzyDups = 0;
+  for (const e of hashDeduped) {
+    const titleA = (e.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const dateA  = e.startDate;
+    let isDup = false;
+    if (dateA && titleA.length >= 5) {
+      for (const prev of accepted) {
+        if (prev.startDate !== dateA) continue;
+        const titleB = (prev.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (levenshtein(titleA, titleB) <= 8) { isDup = true; break; }
+      }
+    }
+    if (!isDup) accepted.push(e);
+    else fuzzyDups++;
+  }
+  const unique = accepted;
+
+  console.log(`  → ${unique.length} unique (${urlDups} URL dups, ${hashDups} hash dups, ${fuzzyDups} fuzzy dups removed)`);
 
   // ── Quality gate ──────────────────────────────────────────────────────────
   console.log('\n✅ QUALITY GATE...');
@@ -566,6 +792,12 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
   const { stored, skipped, errors, storedTitles, firstError } =
     await upsertEvents(valid, vectors, windowEnd);
 
+  // ── OG image enrichment (best-effort, $0 Claude cost) ────────────────────
+  const imagesEnriched = await enrichImages(valid);
+
+  // ── AI Tagging (best-effort, ~$0.002 per 10 events) ──────────────────────
+  const eventsTagged = await runTagging(valid);
+
   // ── Cache cleanup ─────────────────────────────────────────────────────────
   console.log('\n🧹 Cache cleanup...');
   const { error: cacheErr } = await supabase.rpc('cleanup_expired_cache');
@@ -584,6 +816,8 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
   console.log(`   Stored new     : ${stored}`);
   console.log(`   Skipped (dup)  : ${skipped}`);
   console.log(`   Errors         : ${errors}`);
+  console.log(`   Images enriched: ${imagesEnriched}`);
+  console.log(`   Events tagged  : ${eventsTagged}`);
   console.log(`   Duration       : ${(durationMs / 1000).toFixed(1)}s`);
   console.log('══════════════════════════════════════════════');
 
@@ -603,6 +837,8 @@ export async function runCrawl({ batch: batchFilter, skipGapFill = false } = {})
     firstError:      firstError || null,
     gapFillRuns,
     embeddingsGenerated: vectors.filter(Boolean).length,
+    imagesEnriched,
+    eventsTagged,
     durationMs,
   };
 }
