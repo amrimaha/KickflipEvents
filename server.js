@@ -257,6 +257,96 @@ const UNSPLASH_FALLBACK = {
   default:  'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&fit=crop&auto=format',
 };
 
+// ─── Keyword → category map (for user preference capture) ─────────────────────
+// Maps common search keywords to our 10 event categories.
+const KEYWORD_TO_CATEGORY = {
+  // food
+  sushi: 'food', ramen: 'food', pho: 'food', taco: 'food', pizza: 'food',
+  burger: 'food', brunch: 'food', dinner: 'food', lunch: 'food', chef: 'food',
+  restaurant: 'food', foodie: 'food', eat: 'food', taste: 'food', cuisine: 'food',
+  dumpling: 'food', bbq: 'food', boba: 'food', coffee: 'food', cocktail: 'food',
+  // music
+  concert: 'music', band: 'music', dj: 'music', live: 'music', jazz: 'music',
+  rap: 'music', hip: 'music', techno: 'music', indie: 'music', pop: 'music',
+  metal: 'music', classical: 'music', symphony: 'music', beats: 'music', rave: 'music',
+  // art
+  gallery: 'art', exhibit: 'art', museum: 'art', painting: 'art', sculpture: 'art',
+  installation: 'art', mural: 'art', photography: 'art', film: 'art', cinema: 'art',
+  // party
+  club: 'party', nightlife: 'party', glow: 'party', halloween: 'party', masquerade: 'party',
+  // outdoor
+  hike: 'outdoor', hiking: 'outdoor', kayak: 'outdoor', bike: 'outdoor', cycling: 'outdoor',
+  climb: 'outdoor', climbing: 'outdoor', camp: 'outdoor', camping: 'outdoor', trail: 'outdoor',
+  nature: 'outdoor', park: 'outdoor', garden: 'outdoor', market: 'outdoor',
+  // wellness
+  yoga: 'wellness', meditation: 'wellness', wellness: 'wellness', fitness: 'wellness',
+  gym: 'wellness', pilates: 'wellness', breathwork: 'wellness', soundbath: 'wellness',
+  // comedy
+  comedy: 'comedy', standup: 'comedy', improv: 'comedy', laugh: 'comedy', funny: 'comedy',
+  // sports
+  sports: 'sports', game: 'sports', basketball: 'sports', soccer: 'sports', football: 'sports',
+  baseball: 'sports', tennis: 'sports', volleyball: 'sports', esports: 'sports',
+  // fashion
+  fashion: 'fashion', style: 'fashion', design: 'fashion', runway: 'fashion', thrift: 'fashion',
+};
+
+/**
+ * Infer a category from a query string by scanning for known keywords.
+ * Returns the first matched category or null.
+ */
+function extractQueryCategory(query) {
+  const lower = query.toLowerCase();
+  const words = lower.split(/\W+/);
+  for (const word of words) {
+    if (KEYWORD_TO_CATEGORY[word]) return KEYWORD_TO_CATEGORY[word];
+  }
+  // substring scan for multi-char terms (e.g. "outdoor")
+  for (const [kw, cat] of Object.entries(KEYWORD_TO_CATEGORY)) {
+    if (lower.includes(kw)) return cat;
+  }
+  return null;
+}
+
+/** Upsert user preference — increment search_count and add new keyword */
+async function upsertUserPreference(userId, category, keyword) {
+  if (!pgPool || !userId || !category) return;
+  try {
+    const pseudo = pseudonymize(String(userId));
+    await pgPool.query(`
+      INSERT INTO user_preferences (user_id, category, search_count, keywords, last_searched)
+      VALUES ($1, $2, 1, ARRAY[$3]::TEXT[], NOW())
+      ON CONFLICT (user_id, category) DO UPDATE SET
+        search_count  = user_preferences.search_count + 1,
+        keywords      = CASE
+                          WHEN $3 = ANY(user_preferences.keywords) THEN user_preferences.keywords
+                          ELSE array_append(user_preferences.keywords, $3)
+                        END,
+        last_searched = NOW()
+    `, [pseudo, category, keyword || category]);
+  } catch (err) {
+    console.warn('[prefs:upsert] non-fatal:', err.message);
+  }
+}
+
+/** Load top 3 categories for a user — used to personalize Claude prompt */
+async function loadUserPreferences(userId) {
+  if (!pgPool || !userId) return [];
+  try {
+    const pseudo = pseudonymize(String(userId));
+    const { rows } = await pgPool.query(`
+      SELECT category, search_count, keywords
+      FROM user_preferences
+      WHERE user_id = $1
+      ORDER BY search_count DESC, last_searched DESC
+      LIMIT 3
+    `, [pseudo]);
+    return rows;
+  } catch (err) {
+    console.warn('[prefs:load] non-fatal:', err.message);
+    return [];
+  }
+}
+
 /** Fetch full event objects from Supabase by id array */
 async function fetchEventsByIds(ids) {
   if (!ids || ids.length === 0) return [];
@@ -448,7 +538,7 @@ Respond with valid JSON: {"text": "...", "events": [...]}`,
 }
 
 // ─── Option A helper: template vibe text (no Claude call) ────────────
-function buildVibeText(query, events) {
+function buildVibeText(_query, events) {
   const cats = [...new Set(events.slice(0, 3).map(e => e.category).filter(Boolean))];
   if (cats.length === 1) return `Top ${cats[0]} picks in Seattle.`;
   if (cats.length === 2) return `${cats[0]} & ${cats[1]} vibes in Seattle.`;
@@ -456,7 +546,7 @@ function buildVibeText(query, events) {
 }
 
 // ─── Option B helper: stream Claude vibe text → append events JSON ────
-async function streamVibeWithClaude(query, events, _currentDateTime, res) {
+async function streamVibeWithClaude(query, events, _currentDateTime, res, userPrefs = []) {
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no');
@@ -465,10 +555,13 @@ async function streamVibeWithClaude(query, events, _currentDateTime, res) {
     title: e.title, category: e.category,
     date: e.date || e.startDate, location: e.locationName || e.location,
   }));
+  const prefHint = userPrefs.length > 0
+    ? ` This user loves ${userPrefs.map(p => p.category).join(' and ')} events — reflect that in the vibe when relevant.`
+    : '';
   const stream = anthropic.messages.stream({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 60,
-    system: `You are Kickflip, Seattle's event guide. Reply in 1 sentence, max 12 words. Capture the vibe. No JSON.`,
+    system: `You are Kickflip, Seattle's event guide. Reply in 1 sentence, max 12 words. Capture the vibe. No JSON.${prefHint}`,
     messages: [{ role: 'user', content: `Query: "${query}"\nTop matches: ${JSON.stringify(snippets)}` }],
   });
   for await (const event of stream) {
@@ -658,11 +751,20 @@ app.post('/api/chat', async (req, res) => {
 
     console.log(`[chat:${reqId}] STEP 1 — cache MISS`);
 
+    // Load user preferences in background (non-blocking until needed)
+    const userPrefsPromise = loadUserPreferences(user_id);
+
     // ── ② Parse query constraints (date range, is_free, intent) ──────
     console.log(`[chat:${reqId}] STEP 2 — parsing query constraints`);
     const constraints = parseQueryConstraints(query);
     const { intent, dateFrom, dateTo, isFree, dateLabel } = constraints;
     console.log(`[chat:${reqId}] STEP 2 — intent="${intent}" dateLabel=${dateLabel || 'none'} isFree=${isFree ?? 'any'}`);
+
+    // Capture search intent for personalization (fire-and-forget)
+    const inferredCategory = extractQueryCategory(intent || query);
+    if (inferredCategory && user_id) {
+      upsertUserPreference(user_id, inferredCategory, (intent || query).toLowerCase().trim()).catch(() => {});
+    }
 
     // ── ③ Embed the intent (date/free phrases stripped) ───────────────
     console.log(`[chat:${reqId}] STEP 3 — embedding query via Voyage AI`);
@@ -712,6 +814,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const topSimilarity = matchedEvents[0]?.similarity ?? 0;
+    const userPrefs = await userPrefsPromise.catch(() => []);
 
     if (matchedEvents.length >= 3) {
       const rawEvents = matchedEvents.map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
@@ -739,7 +842,7 @@ app.post('/api/chat', async (req, res) => {
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (Option B stream) — ${rawEvents.length} events, ${totalMs}ms`);
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
-      await streamVibeWithClaude(query, rawEvents, currentDateTime, res);
+      await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs);
       return;
 
     } else {
@@ -764,7 +867,7 @@ app.post('/api/chat', async (req, res) => {
         saveConversation({ userId: user_id, query, aiText: broadVibeText, events: rawEvents, source: 'embedding' }).catch(() => {});
         const totalMs = Date.now() - t0;
         trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'embedding' });
-        await streamVibeWithClaude(query, rawEvents, currentDateTime, res);
+        await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs);
         return;
       }
 
