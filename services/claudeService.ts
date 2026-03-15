@@ -1,6 +1,6 @@
 
 import { KickflipEvent } from "../types";
-import { FEATURED_EVENTS, getVideoForEvent } from "../constants";
+import { FEATURED_EVENTS } from "../constants";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const STREAM_DELIMITER = '\n\n[EVENTS_JSON]\n';
@@ -88,7 +88,11 @@ export const searchSeattleEvents = async (
         startDate: e.startDate || null,
         startTime: e.startTime || null,
         date: e.date || 'Upcoming',
-        videoUrl: e.videoUrl || getVideoForEvent(safeCategory, eventId),
+        // Chat results come with imageUrl set by the server's Unsplash fallback.
+        // Do NOT assign a videoUrl here — videos from getVideoForEvent are Pexels URLs
+        // that frequently fail to load, causing the card to fall through to gradient
+        // fallback and show incorrectly (blank card, no title visible).
+        videoUrl: e.videoUrl || undefined,
         price: e.price || '',
         link: e.link || '#',
       };
