@@ -1002,10 +1002,18 @@ const App: React.FC = () => {
           }
         }
       );
+      // Filter out past events from chat results before display
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const futureEvents = result.events.filter(e => {
+        const d = e.startDate || e.date;
+        if (!d || d === 'TBD' || d === 'Upcoming') return true;
+        const parsed = new Date(d);
+        return isNaN(parsed.getTime()) || parsed >= today;
+      });
       // Replace placeholder with final message (includes events + conversationId for feedback)
       setMessages(prev => [
         ...prev.slice(0, -1),
-        { role: 'model', text: result.text, events: result.events, conversationId: result.conversationId },
+        { role: 'model', text: result.text, events: futureEvents, conversationId: result.conversationId },
       ]);
       setCurrentEvents(result.events);
       setLoadingState(LoadingState.COMPLETE);

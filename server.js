@@ -665,16 +665,47 @@ vibeTags (array), price, link (real URL).`,
   }
   if (parsed.text) parsed.text = stripTags(parsed.text);
 
+  // Drop events that have already passed (web search sometimes returns recent-past events)
+  if (Array.isArray(parsed.events)) {
+    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4h buffer for in-progress
+    parsed.events = parsed.events.filter(e => {
+      const rawDate = e.startDate || e.date;
+      if (!rawDate || rawDate === 'TBD' || rawDate === 'Upcoming') return true; // no date → keep
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return true; // unparseable → keep
+      return d >= cutoff;
+    });
+  }
+
   return parsed;
 }
 
 /** Store newly discovered events (from web search) back into Supabase with embeddings */
 async function storeDiscoveredEvents(events) {
   if (!events || events.length === 0) return;
-  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
   for (const event of events) {
     try {
+      // Parse the event's actual date to determine start_time and expires_at
+      const rawDate = event.startDate || event.date;
+      let startTime = null;
+      let expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(); // default
+
+      if (rawDate && rawDate !== 'TBD' && rawDate !== 'Upcoming') {
+        const parsed = new Date(rawDate);
+        if (!isNaN(parsed.getTime())) {
+          // Skip events that already ended (more than 4h ago)
+          if (parsed < fourHoursAgo) {
+            console.log(`[store] Skipping past event: "${event.title}" (${rawDate})`);
+            continue;
+          }
+          startTime = parsed.toISOString();
+          // Expire 1 day after the event starts
+          expiresAt = new Date(parsed.getTime() + 24 * 60 * 60 * 1000).toISOString();
+        }
+      }
+
       const embedding = await embedEvent(event);
       await supabase.from('kickflip_events').upsert({
         id: event.id || `discovered-${Date.now()}`,
@@ -686,7 +717,9 @@ async function storeDiscoveredEvents(events) {
         crawled_at: new Date().toISOString(),
         source_url: event.link || null,
         crawl_source: event.crawlSource || null,
+        start_time: startTime,
         expires_at: expiresAt,
+        is_active: true,
       }, { onConflict: 'id' });
     } catch (err) {
       console.warn(`Failed to store discovered event "${event.title}":`, err.message);
@@ -1221,10 +1254,12 @@ app.get('/api/events', async (_req, res) => {
     // Select both the legacy payload blob (Node.js crawler) AND individual
     // columns (Ravi's Python crawler).  Events from either crawler are
     // normalized below into the same KickflipEvent shape.
+    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(); // 4h buffer for in-progress
     const { data, error } = await supabase
       .from('kickflip_events')
       .select('id, payload, image_url, start_time, title, venue, address, city, price, is_free, ticket_url, source_url, source_name, categories, event_summary, description, vibe_tags, origin')
-      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .or(`expires_at.is.null,expires_at.gt.${now}`)          // not expired
+      .or(`start_time.is.null,start_time.gt.${cutoff}`)       // not already started (4h buffer)
       .order('start_time', { ascending: true, nullsFirst: false })
       .limit(150);
 
