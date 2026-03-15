@@ -595,8 +595,10 @@ async function discoverWithWebSearch(query, currentDateTime) {
 USER QUERY: "${query}"
 
 No matching events were found in the internal database.
-Use web_search to find real current Seattle events matching this query.
-Search for specific event listings, not just venue homepages.
+Use web_search to find real upcoming Seattle events matching this query.
+- Do at least 2 searches: one specific to the query, one broader (e.g. "Seattle food events this week" if no exact match)
+- Find real events with actual future dates and venues — no past events
+- NEVER return empty events[]. If nothing specific found, return the best related Seattle events you find.
 Return valid JSON: {"text": "max 12 word vibe", "events": [array of event objects]}
 
 Each event needs: id (string), title, date, location, description,
@@ -605,13 +607,13 @@ vibeTags (array), price, link (real URL).`,
   }];
 
   let finalText = '';
-  const MAX_TURNS = 3;
+  const MAX_TURNS = 4;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await anthropic.messages.create(
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1500,
+        max_tokens: 2000,
         system: SYSTEM_PROMPT,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: conversationMessages,
@@ -624,21 +626,14 @@ vibeTags (array), price, link (real URL).`,
     if (response.stop_reason === 'end_turn') break;
 
     if (response.stop_reason === 'tool_use') {
+      // web_search_20250305 is a server-side tool — the API auto-executes the search
+      // and includes web_search_tool_result_20250305 blocks in the same response.
+      // Push the full assistant response, then ask Claude to produce the JSON.
       conversationMessages.push({ role: 'assistant', content: response.content });
-      const toolResults = response.content
-        .filter(b => b.type === 'tool_use')
-        .map(b => {
-          const resultBlock = response.content.find(
-            rb => rb.type === 'web_search_tool_result_20250305' && rb.tool_use_id === b.id
-          );
-          return {
-            type: 'tool_result',
-            tool_use_id: b.id,
-            content: resultBlock ? resultBlock.content : 'Search complete.',
-          };
-        });
-      if (toolResults.length > 0) conversationMessages.push({ role: 'user', content: toolResults });
-      else break;
+      conversationMessages.push({
+        role: 'user',
+        content: 'Based on those search results, return the JSON now with the events you found. If nothing specific, return the best related Seattle events from your results.',
+      });
     } else break;
   }
 
@@ -774,7 +769,7 @@ app.post('/api/chat', async (req, res) => {
       console.log(`[chat:${reqId}] STEP 3 — embedding OK (${queryVector?.length} dims)`);
     } catch (embedErr) {
       console.warn(`[chat:${reqId}] STEP 3 — embedding FAILED: ${embedErr.message} — falling back to chronological`);
-      const fallbackEvents = await searchChronological(constraints, 10);
+      const fallbackEvents = await searchChronological({ ...constraints, dateFrom: constraints.dateFrom || new Date().toISOString() }, 10);
       console.log(`[chat:${reqId}] STEP 3 fallback — chronological returned ${fallbackEvents.length} events`);
       const result = fallbackEvents.length >= 1
         ? await formatWithClaude(query, fallbackEvents, currentDateTime)
@@ -887,7 +882,7 @@ app.post('/api/chat', async (req, res) => {
       if (rawEvents.length === 0) {
         console.log(`[chat:${reqId}] STEP 6 — web search empty, falling back to chronological`);
         try {
-          const fallbackEvents = await searchChronological({}, 8);
+          const fallbackEvents = await searchChronological({ dateFrom: new Date().toISOString() }, 8);
           if (fallbackEvents.length > 0) {
             rawEvents = fallbackEvents;
             const noResultLine = wsResult.text ? `${wsResult.text} ` : '';
