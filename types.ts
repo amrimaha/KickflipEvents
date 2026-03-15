@@ -37,6 +37,7 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   events?: KickflipEvent[];
+  conversationId?: string | null;
 }
 
 export interface NotificationPreferences {

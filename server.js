@@ -546,10 +546,11 @@ function buildVibeText(_query, events) {
 }
 
 // ─── Option B helper: stream Claude vibe text → append events JSON ────
-async function streamVibeWithClaude(query, events, _currentDateTime, res, userPrefs = []) {
+async function streamVibeWithClaude(query, events, _currentDateTime, res, userPrefs = [], conversationId) {
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no');
+    if (conversationId) res.setHeader('X-Conversation-Id', conversationId);
   }
   const snippets = events.slice(0, 5).map(e => ({
     title: e.title, category: e.category,
@@ -570,19 +571,20 @@ async function streamVibeWithClaude(query, events, _currentDateTime, res, userPr
     }
   }
   res.write('\n\n[EVENTS_JSON]\n');
-  res.write(JSON.stringify(events));
+  res.write(JSON.stringify({ conversationId: conversationId || null, events }));
   res.end();
 }
 
 // ─── Shared stream sender (for cache hits, web search, errors) ────────
-function sendStreamResult(res, text, events) {
+function sendStreamResult(res, text, events, conversationId) {
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no'); // prevent Railway/Nginx from buffering
+    if (conversationId) res.setHeader('X-Conversation-Id', conversationId);
   }
   res.write(text || '');
   res.write('\n\n[EVENTS_JSON]\n');
-  res.write(JSON.stringify(events || []));
+  res.write(JSON.stringify({ conversationId: conversationId || null, events: events || [] }));
   res.end();
 }
 
@@ -693,14 +695,17 @@ async function storeDiscoveredEvents(events) {
 }
 
 /** Save a chat interaction for scoring — non-blocking, fire-and-forget */
-async function saveConversation({ userId, query, aiText, events, source, similarityScore }) {
+async function saveConversation({ userId, conversationId, query, aiText, events, source, similarityScore }) {
   if (!pgPool) return;
   try {
     const pseudo = userId ? pseudonymize(String(userId)) : null;
+    const id = conversationId || crypto.randomUUID();
     await pgPool.query(
-      `INSERT INTO chat_conversations (user_id, user_message, ai_response, events_returned, source, similarity_score, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      `INSERT INTO chat_conversations (id, user_id, user_message, ai_response, events_returned, source, similarity_score, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       ON CONFLICT (id) DO NOTHING`,
       [
+        id,
         pseudo,
         query,
         aiText || '',
@@ -721,6 +726,7 @@ app.post('/api/chat', async (req, res) => {
   if (!query) return res.status(400).json({ error: 'query is required' });
   const t0 = Date.now();
   const reqId = Math.random().toString(36).slice(2, 8); // short ID to trace one request in logs
+  const conversationId = crypto.randomUUID(); // stable ID for this entire request
 
   const currentDateTime = new Date().toLocaleString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -738,8 +744,8 @@ app.post('/api/chat', async (req, res) => {
     if (cached) {
       console.log(`[chat:${reqId}] STEP 1 — cache HIT, returning cached result`);
       const events = await fetchEventsByIds(cached.event_ids);
-      sendStreamResult(res, cached.result_text, events);
-      saveConversation({ userId: user_id, query, aiText: cached.result_text, events, source: 'cache' }).catch(() => {});
+      sendStreamResult(res, cached.result_text, events, conversationId);
+      saveConversation({ userId: user_id, conversationId, query, aiText: cached.result_text, events, source: 'cache' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'cache' });
       return;
     }
@@ -776,8 +782,8 @@ app.post('/api/chat', async (req, res) => {
         : await discoverWithWebSearch(query, currentDateTime);
       const rawEvents = (result.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
       await saveCache(queryHash, query, rawEvents.map(e => e.id), result.text || '');
-      sendStreamResult(res, result.text || 'Checking the local scene...', rawEvents);
-      saveConversation({ userId: user_id, query, aiText: result.text, events: rawEvents, source: 'chronological' }).catch(() => {});
+      sendStreamResult(res, result.text || 'Checking the local scene...', rawEvents, conversationId);
+      saveConversation({ userId: user_id, conversationId, query, aiText: result.text, events: rawEvents, source: 'chronological' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: Date.now() - t0, statusCode: 200, source: 'chronological' });
       return;
     }
@@ -822,8 +828,8 @@ app.post('/api/chat', async (req, res) => {
         await saveCache(queryHash, query, rawEvents.map(e => e.id), vibeText);
         const totalMs = Date.now() - t0;
         console.log(`[chat:${reqId}] DONE (Option A) — ${rawEvents.length} events, ${totalMs}ms`);
-        sendStreamResult(res, vibeText, rawEvents);
-        saveConversation({ userId: user_id, query, aiText: vibeText, events: rawEvents, source: `${responseSource}_fast`, similarityScore: topSimilarity }).catch(() => {});
+        sendStreamResult(res, vibeText, rawEvents, conversationId);
+        saveConversation({ userId: user_id, conversationId, query, aiText: vibeText, events: rawEvents, source: `${responseSource}_fast`, similarityScore: topSimilarity }).catch(() => {});
         trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: `${responseSource}_fast` });
         return;
       }
@@ -833,11 +839,11 @@ app.post('/api/chat', async (req, res) => {
       // Cache will be saved after streaming completes — fire a deferred save
       const vibeForCache = buildVibeText(query, rawEvents); // placeholder; real vibe arrives after stream
       saveCache(queryHash, query, rawEvents.map(e => e.id), vibeForCache).catch(() => {});
-      saveConversation({ userId: user_id, query, aiText: vibeForCache, events: rawEvents, source: responseSource, similarityScore: topSimilarity }).catch(() => {});
+      saveConversation({ userId: user_id, conversationId, query, aiText: vibeForCache, events: rawEvents, source: responseSource, similarityScore: topSimilarity }).catch(() => {});
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (Option B stream) — ${rawEvents.length} events, ${totalMs}ms`);
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: responseSource });
-      await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs);
+      await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs, conversationId);
       return;
 
     } else {
@@ -859,10 +865,10 @@ app.post('/api/chat', async (req, res) => {
         console.log(`[chat:${reqId}] STEP 5 — stream broad match (${rawEvents.length} events)`);
         const broadVibeText = buildVibeText(query, rawEvents);
         saveCache(queryHash, query, rawEvents.map(e => e.id), broadVibeText).catch(() => {});
-        saveConversation({ userId: user_id, query, aiText: broadVibeText, events: rawEvents, source: 'embedding' }).catch(() => {});
+        saveConversation({ userId: user_id, conversationId, query, aiText: broadVibeText, events: rawEvents, source: 'embedding' }).catch(() => {});
         const totalMs = Date.now() - t0;
         trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'embedding' });
-        await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs);
+        await streamVibeWithClaude(query, rawEvents, currentDateTime, res, userPrefs, conversationId);
         return;
       }
 
@@ -897,8 +903,8 @@ app.post('/api/chat', async (req, res) => {
       await saveCache(queryHash, query, rawEvents.map(e => e.id), finalText);
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (websearch) — ${rawEvents.length} events, ${totalMs}ms`);
-      sendStreamResult(res, finalText, rawEvents);
-      saveConversation({ userId: user_id, query, aiText: finalText, events: rawEvents, source: 'websearch' }).catch(() => {});
+      sendStreamResult(res, finalText, rawEvents, conversationId);
+      saveConversation({ userId: user_id, conversationId, query, aiText: finalText, events: rawEvents, source: 'websearch' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'websearch' });
       return;
     }
@@ -914,6 +920,34 @@ app.post('/api/chat', async (req, res) => {
       try { sendStreamResult(res, 'Connection bumpy. Try again?', []); } catch (_) {}
     }
     trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 500, source: null });
+  }
+});
+
+// ─── POST /api/feedback — Thumbs up/down for a chat response ─────────
+// Body: { conversationId, score: 'helpful'|'not_helpful', user_id? }
+
+app.post('/api/feedback', async (req, res) => {
+  const { conversationId, score, user_id } = req.body;
+  const validScores = ['helpful', 'not_helpful'];
+  if (!conversationId || !validScores.includes(score)) {
+    return res.status(400).json({ error: 'conversationId and score (helpful|not_helpful) required' });
+  }
+  if (!pgPool) return res.status(503).json({ error: 'DB not configured' });
+
+  try {
+    const pseudo = user_id ? pseudonymize(String(user_id)) : null;
+    await pgPool.query(`
+      INSERT INTO chat_scores
+        (conversation_id, score_type, score, scored_by, scored_at, user_id)
+      VALUES ($1, 'user_feedback', $2, 'user', NOW(), $3)
+      ON CONFLICT (conversation_id, score_type) DO UPDATE SET
+        score     = EXCLUDED.score,
+        scored_at = NOW()
+    `, [conversationId, score, pseudo]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[feedback] error:', err.message);
+    res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
 

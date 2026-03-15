@@ -2,7 +2,7 @@
 import { KickflipEvent } from "../types";
 import { FEATURED_EVENTS } from "../constants";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const STREAM_DELIMITER = '\n\n[EVENTS_JSON]\n';
 
 /**
@@ -14,7 +14,7 @@ async function fetchChatStream(
   url: string,
   body: object,
   onChunk?: (partial: string) => void
-): Promise<{ text: string; events: any[] }> {
+): Promise<{ text: string; events: any[]; conversationId: string | null }> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -26,7 +26,7 @@ async function fetchChatStream(
   const contentType = res.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const data = await res.json();
-    return { text: data.text || '', events: data.events || [] };
+    return { text: data.text || '', events: data.events || [], conversationId: null };
   }
 
   const reader = res.body!.getReader();
@@ -47,20 +47,32 @@ async function fetchChatStream(
   }
 
   const delimIdx = accumulated.indexOf(STREAM_DELIMITER);
-  if (delimIdx === -1) return { text: accumulated.trim(), events: [] };
+  if (delimIdx === -1) return { text: accumulated.trim(), events: [], conversationId: null };
 
   const vibeText = accumulated.slice(0, delimIdx).trim();
-  const eventsJson = accumulated.slice(delimIdx + STREAM_DELIMITER.length);
+  const payloadJson = accumulated.slice(delimIdx + STREAM_DELIMITER.length);
+
+  // Payload is { conversationId, events } — parse with fallback to plain array
   let events: any[] = [];
-  try { events = JSON.parse(eventsJson); } catch { events = []; }
-  return { text: vibeText, events };
+  let conversationId: string | null = null;
+  try {
+    const payload = JSON.parse(payloadJson);
+    if (Array.isArray(payload)) {
+      events = payload; // backward-compat: old format was a plain array
+    } else {
+      events = payload.events || [];
+      conversationId = payload.conversationId || null;
+    }
+  } catch { events = []; }
+
+  return { text: vibeText, events, conversationId };
 }
 
 export const searchSeattleEvents = async (
   query: string,
   systemEvents: KickflipEvent[] = [],
   onChunk?: (partial: string) => void
-): Promise<{ text: string; events: KickflipEvent[] }> => {
+): Promise<{ text: string; events: KickflipEvent[]; conversationId: string | null }> => {
   try {
     const registrySource = systemEvents.length > 0 ? systemEvents : FEATURED_EVENTS;
 
@@ -101,12 +113,14 @@ export const searchSeattleEvents = async (
     return {
       text: data.text || 'Checking the local scene for you...',
       events: rawEvents,
+      conversationId: data.conversationId,
     };
   } catch (error) {
     console.error('Discovery Engine Error:', error);
     return {
       text: 'Connection bumpy. The engine is resetting... try that again?',
       events: [],
+      conversationId: null,
     };
   }
 };

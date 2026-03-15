@@ -14,7 +14,7 @@ import { BackendConfigModal } from './components/BackendConfigModal';
 import { PublicEventView } from './components/PublicEventView';
 import { CheckoutModal } from './components/CheckoutModal';
 import { ChatMessage, KickflipEvent, LoadingState, ThemeConfig, User, ChatSession, ViewState, EventDraft, VibemojiConfig, OnboardingPreferences } from './types';
-import { searchSeattleEvents } from './services/claudeService';
+import { searchSeattleEvents, API_URL } from './services/claudeService';
 import { BACKGROUND_OPTIONS, FEATURED_EVENTS, CATEGORY_COLORS, DEFAULT_INITIAL_DRAFT, draftToEvent } from './constants';
 import { fetchRemoteEvents, fetchEventById, syncEventToRemote, deleteRemoteEvent, isBackendConfigured, subscribeToEvents, unsubscribeEvents, getBackendDiagnostics } from './services/supabaseClient';
 import { apiCreateChat, apiStartSession, apiEndSession, apiStoreMessages, apiLoadChatHistory, apiLoadChatMessages } from './services/chatHistoryService';
@@ -129,6 +129,7 @@ const App: React.FC = () => {
   ]);
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
+  const [feedbackState, setFeedbackState] = useState<Record<number, 'helpful' | 'not_helpful'>>({});
   const [currentEvents, setCurrentEvents] = useState<KickflipEvent[]>([]);
   
   // Persistent Created Events
@@ -1001,10 +1002,10 @@ const App: React.FC = () => {
           }
         }
       );
-      // Replace placeholder with final message (includes events)
+      // Replace placeholder with final message (includes events + conversationId for feedback)
       setMessages(prev => [
         ...prev.slice(0, -1),
-        { role: 'model', text: result.text, events: result.events },
+        { role: 'model', text: result.text, events: result.events, conversationId: result.conversationId },
       ]);
       setCurrentEvents(result.events);
       setLoadingState(LoadingState.COMPLETE);
@@ -1013,6 +1014,17 @@ const App: React.FC = () => {
       setMessages(prev => [...prev.slice(0, -1), { role: 'model', text: "My bad, I tripped up finding that. Try again?" }]);
       setLoadingState(LoadingState.ERROR);
     }
+  };
+
+  const handleFeedback = async (msgIdx: number, conversationId: string, score: 'helpful' | 'not_helpful') => {
+    setFeedbackState((prev: Record<number, 'helpful' | 'not_helpful'>) => ({ ...prev, [msgIdx]: score }));
+    try {
+      await fetch(`${API_URL}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, score, user_id: user?.id || null }),
+      });
+    } catch { /* non-fatal */ }
   };
 
   // ... (View/Edit handlers)
@@ -1330,10 +1342,10 @@ const App: React.FC = () => {
                 <div className="w-full mt-12 mb-4 animate-in slide-in-from-bottom-10 fade-in duration-700">
                   <div className="flex gap-4 overflow-x-auto no-scrollbar pb-8 snap-x snap-mandatory pl-1">
                     {msg.events.map((event) => (
-                      <EventCard 
-                        key={event.id} 
-                        event={event} 
-                        theme={theme} 
+                      <EventCard
+                        key={event.id}
+                        event={event}
+                        theme={theme}
                         className="w-[340px] sm:w-[380px]"
                         onTagClick={handleTagClick}
                         isSuperAdmin={isSuperAdmin}
@@ -1342,6 +1354,29 @@ const App: React.FC = () => {
                       />
                     ))}
                   </div>
+                </div>
+              )}
+              {msg.role === 'model' && msg.conversationId && msg.text && (
+                <div className="flex items-center gap-2 mt-1 animate-in fade-in duration-500">
+                  <button
+                    onClick={() => handleFeedback(idx, msg.conversationId!, 'helpful')}
+                    title="Helpful"
+                    className={`p-1.5 rounded-full transition-all duration-200 text-sm ${feedbackState[idx] === 'helpful' ? 'bg-green-500/30 text-green-400 scale-110' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={() => handleFeedback(idx, msg.conversationId!, 'not_helpful')}
+                    title="Not helpful"
+                    className={`p-1.5 rounded-full transition-all duration-200 text-sm ${feedbackState[idx] === 'not_helpful' ? 'bg-red-500/30 text-red-400 scale-110' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
+                  >
+                    👎
+                  </button>
+                  {feedbackState[idx] && (
+                    <span className="text-xs text-white/30 ml-1">
+                      {feedbackState[idx] === 'helpful' ? 'Thanks!' : 'Got it'}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
