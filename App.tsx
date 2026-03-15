@@ -489,7 +489,7 @@ const App: React.FC = () => {
             stripeConnected: false
         };
         
-        const existingStored = localStorage.getItem('kickflip_user');
+        const existingStored = sessionStorage.getItem('kickflip_user');
         const finalUser = existingStored ? { ...JSON.parse(existingStored), ...authenticatedUser } : authenticatedUser;
 
         setCreatedEvents(prev => {
@@ -506,7 +506,7 @@ const App: React.FC = () => {
         });
 
         setUser(finalUser);
-        localStorage.setItem('kickflip_user', JSON.stringify(finalUser));
+        sessionStorage.setItem('kickflip_user', JSON.stringify(finalUser));
         setIsDrawerOpen(false);
         
         // Onboarding disabled — restore by uncommenting below
@@ -520,7 +520,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('kickflip_user');
+    const savedUser = sessionStorage.getItem('kickflip_user');
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
@@ -689,7 +689,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('kickflip_user');
+    sessionStorage.removeItem('kickflip_user');
     setCurrentView('home');
     setShowOnboarding(false);
     if (window.google) {
@@ -703,7 +703,7 @@ const App: React.FC = () => {
     if (user) {
         const updatedUser = { ...user, ...updates };
         setUser(updatedUser);
-        localStorage.setItem('kickflip_user', JSON.stringify(updatedUser));
+        sessionStorage.setItem('kickflip_user', JSON.stringify(updatedUser));
     }
   };
 
