@@ -140,160 +140,41 @@ export const DEFAULT_INITIAL_DRAFT: EventDraft = {
   providerName: '',
   socialLinks: {},
   media: [],
-  vibemoji: { 
+  vibemoji: {
     baseId: 'event', hat: 'none', outfit: 'none', pants: 'jeans', shoes: 'skate', expression: 'happy',
-    glasses: 'none', jewelry: 'none', skinTone: '#fca5a5', primaryColor: '#ec4899' 
+    glasses: 'none', jewelry: 'none', skinTone: '#fca5a5', primaryColor: '#ec4899'
   },
   themeColor: '#ec4899',
   status: 'draft',
   ticketsSold: 0,
 };
 
-export const CATEGORY_VIDEOS_MAP: Record<string, string[]> = {
-  music: [
-    "https://videos.pexels.com/video-files/2034810/2034810-hd_1920_1080_30fps.mp4", // DJ
-    "https://videos.pexels.com/video-files/3196029/3196029-hd_1920_1080_25fps.mp4", // Concert Crowd
-    "https://videos.pexels.com/video-files/3042456/3042456-hd_1080_1920_30fps.mp4", // Guitarist Vertical
-    "https://videos.pexels.com/video-files/4990396/4990396-hd_1080_1920_30fps.mp4", // Rave Lights
-    "https://videos.pexels.com/video-files/4039165/4039165-hd_1920_1080_25fps.mp4", // Acoustic
-    "https://videos.pexels.com/video-files/7504383/7504383-hd_1080_1920_30fps.mp4", // Jazz/Sax
-    "https://videos.pexels.com/video-files/2792370/2792370-hd_1920_1080_30fps.mp4", // Vinyl
-    "https://videos.pexels.com/video-files/8922675/8922675-hd_1080_1920_25fps.mp4", // Street Performer
-    "https://videos.pexels.com/video-files/3052219/3052219-hd_1080_1920_30fps.mp4", // Drummer
-    "https://videos.pexels.com/video-files/4725049/4725049-hd_1080_1920_30fps.mp4", // Rock Band
-    "https://videos.pexels.com/video-files/7036660/7036660-hd_1080_1920_30fps.mp4", // Studio Recording
-    "https://videos.pexels.com/video-files/5635035/5635035-hd_1080_1920_24fps.mp4", // Piano
-    "https://videos.pexels.com/video-files/1443564/1443564-hd_1920_1080_30fps.mp4"  // Folk Guitar
-  ],
-  party: [
-    "https://videos.pexels.com/video-files/855018/855018-hd_1920_1080_30fps.mp4",   // Toast
-    "https://videos.pexels.com/video-files/3196377/3196377-hd_1920_1080_25fps.mp4", // Dark Club
-    "https://videos.pexels.com/video-files/3436039/3436039-hd_1080_1920_30fps.mp4", // Neon Signs
-    "https://videos.pexels.com/video-files/5666042/5666042-hd_1080_1920_30fps.mp4", // Disco Ball
-    "https://videos.pexels.com/video-files/4887372/4887372-hd_1080_1920_30fps.mp4", // Night Street
-    "https://videos.pexels.com/video-files/6655116/6655116-hd_1080_1920_25fps.mp4", // Cocktails
-    "https://videos.pexels.com/video-files/5848777/5848777-hd_1080_1920_30fps.mp4", // Rooftop Vibes
-    "https://videos.pexels.com/video-files/4270273/4270273-hd_1080_1920_30fps.mp4", // Dancing
-    "https://videos.pexels.com/video-files/3421528/3421528-hd_1080_1920_30fps.mp4", // Sparklers
-    "https://videos.pexels.com/video-files/4232145/4232145-hd_1080_1920_24fps.mp4", // Clinking Glasses
-    "https://videos.pexels.com/video-files/6281781/6281781-hd_1080_1920_30fps.mp4"  // Confetti
-  ],
-  food: [
-    "https://videos.pexels.com/video-files/2620043/2620043-hd_1920_1080_25fps.mp4", // Burger
-    "https://videos.pexels.com/video-files/3205934/3205934-hd_1920_1080_25fps.mp4", // Bar/Drinks
-    "https://videos.pexels.com/video-files/4061556/4061556-hd_1080_1920_30fps.mp4", // Coffee Pour
-    "https://videos.pexels.com/video-files/5820987/5820987-hd_1080_1920_30fps.mp4", // Plating Food
-    "https://videos.pexels.com/video-files/4253163/4253163-hd_1080_1920_25fps.mp4", // Street Food
-    "https://videos.pexels.com/video-files/3752668/3752668-hd_1920_1080_24fps.mp4", // Wine
-    "https://videos.pexels.com/video-files/4552079/4552079-hd_1080_1920_30fps.mp4", // Pizza
-    "https://videos.pexels.com/video-files/8523126/8523126-hd_1080_1920_25fps.mp4", // Sushi
-    "https://videos.pexels.com/video-files/4113174/4113174-hd_1080_1920_30fps.mp4", // Pasta
-    "https://videos.pexels.com/video-files/4458380/4458380-hd_1080_1920_30fps.mp4", // Tacos
-    "https://videos.pexels.com/video-files/3196232/3196232-hd_1080_1920_25fps.mp4", // Chef Cooking
-    "https://videos.pexels.com/video-files/5912885/5912885-hd_1080_1920_30fps.mp4"  // Smoothie
-  ],
-  art: [
-    "https://videos.pexels.com/video-files/3754968/3754968-hd_1920_1080_25fps.mp4", // Gallery Walk
-    "https://videos.pexels.com/video-files/1779207/1779207-hd_1920_1080_25fps.mp4", // Painting
-    "https://videos.pexels.com/video-files/7494432/7494432-hd_1080_1920_30fps.mp4", // Museum
-    "https://videos.pexels.com/video-files/3975549/3975549-hd_1080_1920_30fps.mp4", // Street Art
-    "https://videos.pexels.com/video-files/5533358/5533358-hd_1080_1920_30fps.mp4", // Sculpture
-    "https://videos.pexels.com/video-files/3063544/3063544-hd_1080_1920_24fps.mp4", // Abstract Light
-    "https://videos.pexels.com/video-files/3205096/3205096-hd_1080_1920_25fps.mp4", // Sketching
-    "https://videos.pexels.com/video-files/4988587/4988587-hd_1080_1920_30fps.mp4", // Pottery
-    "https://videos.pexels.com/video-files/4761405/4761405-hd_1080_1920_30fps.mp4", // Digital Art
-    "https://videos.pexels.com/video-files/6938914/6938914-hd_1080_1920_30fps.mp4", // Photography
-    "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4"  // Theater
-  ],
-  outdoor: [
-    "https://videos.pexels.com/video-files/1959771/1959771-hd_1920_1080_25fps.mp4", // Hiking
-    "https://videos.pexels.com/video-files/2335191/2335191-hd_1920_1080_25fps.mp4", // Park
-    "https://videos.pexels.com/video-files/5049303/5049303-hd_1920_1080_24fps.mp4", // City View
-    "https://videos.pexels.com/video-files/853906/853906-hd_1920_1080_30fps.mp4",   // Beach
-    "https://videos.pexels.com/video-files/2431671/2431671-hd_1920_1080_30fps.mp4", // Forest
-    "https://videos.pexels.com/video-files/4243685/4243685-hd_1080_1920_30fps.mp4", // Sunset
-    "https://videos.pexels.com/video-files/3327672/3327672-hd_1920_1080_24fps.mp4", // Picnic
-    "https://videos.pexels.com/video-files/3204981/3204981-hd_1080_1920_25fps.mp4", // Cycling
-    "https://videos.pexels.com/video-files/4492795/4492795-hd_1080_1920_25fps.mp4", // Skateboarding
-    "https://videos.pexels.com/video-files/8760971/8760971-hd_1080_1920_30fps.mp4"  // Running Trail
-  ],
-  wellness: [
-    "https://videos.pexels.com/video-files/3759654/3759654-hd_1920_1080_25fps.mp4", // Yoga
-    "https://videos.pexels.com/video-files/3194277/3194277-hd_1920_1080_25fps.mp4", // Meditation
-    "https://videos.pexels.com/video-files/6642732/6642732-hd_1080_1920_25fps.mp4", // Gym/Workout
-    "https://videos.pexels.com/video-files/4496262/4496262-hd_1080_1920_25fps.mp4", // Spa
-    "https://videos.pexels.com/video-files/4057317/4057317-hd_1080_1920_30fps.mp4", // Running
-    "https://videos.pexels.com/video-files/5912885/5912885-hd_1080_1920_30fps.mp4", // Healthy Smoothie
-    "https://videos.pexels.com/video-files/6709848/6709848-hd_1080_1920_30fps.mp4", // Pilates
-    "https://videos.pexels.com/video-files/7790897/7790897-hd_1080_1920_30fps.mp4", // Matcha
-    "https://videos.pexels.com/video-files/6644265/6644265-hd_1080_1920_25fps.mp4"  // Stretching
-  ],
-  fashion: [
-    "https://videos.pexels.com/video-files/3206275/3206275-hd_1920_1080_25fps.mp4", // Market
-    "https://videos.pexels.com/video-files/3753387/3753387-hd_1920_1080_25fps.mp4", // Shopping
-    "https://videos.pexels.com/video-files/6003975/6003975-hd_1080_1920_30fps.mp4", // Photoshoot
-    "https://videos.pexels.com/video-files/5709325/5709325-hd_1080_1920_30fps.mp4", // Runway
-    "https://videos.pexels.com/video-files/6334253/6334253-hd_1080_1920_30fps.mp4", // Street Style
-    "https://videos.pexels.com/video-files/7653773/7653773-hd_1080_1920_25fps.mp4", // Sewing/Design
-    "https://videos.pexels.com/video-files/3961623/3961623-hd_1080_1920_25fps.mp4", // Thrift Shopping
-    "https://videos.pexels.com/video-files/4937740/4937740-hd_1080_1920_30fps.mp4", // Accessories
-    "https://videos.pexels.com/video-files/6995180/6995180-hd_1080_1920_30fps.mp4"  // Sneaker Store
-  ],
-  sports: [
-    "https://videos.pexels.com/video-files/4761611/4761611-hd_1080_1920_30fps.mp4", // Soccer/Field
-    "https://videos.pexels.com/video-files/3196029/3196029-hd_1920_1080_25fps.mp4", // Stadium Crowd
-    "https://videos.pexels.com/video-files/855564/855564-hd_1280_720_24fps.mp4",     // Time Lapse Stadium
-    "https://videos.pexels.com/video-files/6939989/6939989-hd_1080_1920_30fps.mp4"  // Basketball
-  ],
-  comedy: [
-    "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4", // Microphone/Stage
-    "https://videos.pexels.com/video-files/3819777/3819777-hd_1920_1080_25fps.mp4", // Laughing people
-    "https://videos.pexels.com/video-files/4990867/4990867-hd_1080_1920_30fps.mp4", // Performer vertical
-    "https://videos.pexels.com/video-files/7504383/7504383-hd_1080_1920_30fps.mp4", // Jazz club vibe
-    "https://videos.pexels.com/video-files/855018/855018-hd_1920_1080_30fps.mp4",   // Toast/Social
-  ],
-  other: [
-    "https://videos.pexels.com/video-files/3163534/3163534-hd_1920_1080_30fps.mp4", // City Traffic
-    "https://videos.pexels.com/video-files/2759477/2759477-hd_1920_1080_30fps.mp4", // Abstract
-    "https://videos.pexels.com/video-files/3121459/3121459-hd_1920_1080_24fps.mp4", // Crowd Walking
-    "https://videos.pexels.com/video-files/855564/855564-hd_1280_720_24fps.mp4",     // Time Lapse
-    "https://videos.pexels.com/video-files/2330366/2330366-hd_1920_1080_30fps.mp4",   // Neon Abstract
-    "https://videos.pexels.com/video-files/3205779/3205779-hd_1080_1920_25fps.mp4", // Urban Explore
-    "https://videos.pexels.com/video-files/3252187/3252187-hd_1080_1920_25fps.mp4", // Ferry Boat
-    "https://videos.pexels.com/video-files/4505456/4505456-hd_1920_1080_25fps.mp4"  // Gardening
-  ]
-};
-
-export const getVideoForEvent = (category: string, eventId: string): string => {
-  // Safe handling for missing/null inputs
-  const safeCategory = (category || 'other').toLowerCase();
-  // Ensure valid key for map
-  const videos = CATEGORY_VIDEOS_MAP[safeCategory] || CATEGORY_VIDEOS_MAP['other'];
-  
-  // Safe hash generation
-  const safeId = eventId || 'default-id';
-  let hash = 0;
-  for (let i = 0; i < safeId.length; i++) {
-    hash = ((hash << 5) - hash) + safeId.charCodeAt(i);
-    hash |= 0; // Convert to 32bit integer
-  }
-  const index = Math.abs(hash) % videos.length;
-  return videos[index];
-};
+// CATEGORY_VIDEOS_MAP and getVideoForEvent removed — Pexels videos caused blank cards
+// (videos failed to load → no imageUrl fallback → gradient). Use imageUrl with Unsplash instead.
+//
+// Unsplash category fallbacks (matches server.js UNSPLASH_FALLBACK):
+//   music:    photo-1493225457124-a3eb161ffa5f
+//   art:      photo-1547891654-e66ed7ebb968
+//   food:     photo-1414235077428-338989a2e8c0
+//   outdoor:  photo-1441974231531-c6227db76b6e
+//   comedy:   photo-1527224538127-2104bb71c51b
+//   sports:   photo-1461896836934-ffe607ba8211
+//   wellness: photo-1544367567-0f2fcb009e0b
+//   party:    photo-1516450360452-9312f5e86fc7
+//   other:    photo-1492684223066-81342ee5ff30
 
 export const draftToEvent = (draft: EventDraft): KickflipEvent => {
     // Check if the user has uploaded specific media
     const hasCustomMedia = draft.media && draft.media.length > 0;
-    
-    // Only use fallback video if NO custom media exists AND no iframeURL is set
-    // For crawled events, we might use iframeUrl as the visual fallback
-    const fallbackVideo = (hasCustomMedia || draft.iframeUrl) ? undefined : getVideoForEvent(draft.category, draft.id);
+
+    // User-created events use their uploaded media; no Pexels video fallback
+    const fallbackVideo = (hasCustomMedia || draft.iframeUrl) ? undefined : undefined;
 
     // Determine correct link strategy:
     // 1. If it's a crawled/imported event with an explicit source URL, use that.
     // 2. Otherwise, use internal deep link.
-    const externalLink = (draft.origin === 'crawl' && (draft.iframeUrl || draft.crawlSource)) 
-        ? (draft.iframeUrl || '#') 
+    const externalLink = (draft.origin === 'crawl' && (draft.iframeUrl || draft.crawlSource))
+        ? (draft.iframeUrl || '#')
         : undefined;
 
     return {
@@ -312,7 +193,7 @@ export const draftToEvent = (draft: EventDraft): KickflipEvent => {
         organizer: draft.providerName || (draft.origin === 'crawl' ? draft.crawlSource : 'Me'),
         vibemoji: draft.vibemoji,
         // Ensure legacy fields are only populated if custom media is absent
-        videoUrl: fallbackVideo, 
+        videoUrl: fallbackVideo,
         imageUrl: undefined,
         origin: draft.origin,
         crawlSource: draft.crawlSource,
@@ -336,7 +217,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://emeraldcitymusic.org/calendar",
       price: "Varies",
       organizer: "Emerald City Music",
-      videoUrl: "https://videos.pexels.com/video-files/7504383/7504383-hd_1080_1920_30fps.mp4", // Jazz/Sax/Instrumental vibe
+      imageUrl: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Emerald City Music"
     },
@@ -351,7 +232,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.afseattle.org/community/event-rsvp/?event_id=780",
       price: "Varies",
       organizer: "AF Seattle",
-      videoUrl: "https://videos.pexels.com/video-files/3754968/3754968-hd_1920_1080_25fps.mp4", // Art gallery vibe
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "AF Seattle"
     },
@@ -366,7 +247,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.handstamp.com/e/ritual-of-mates-zvqu48jh",
       price: "See Link",
       organizer: "Handstamp",
-      videoUrl: "https://videos.pexels.com/video-files/3196377/3196377-hd_1920_1080_25fps.mp4", // Club/Dark vibe
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Handstamp"
     },
@@ -381,7 +262,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://theimprovplace.org/",
       price: "Varies",
       organizer: "The Improv Place",
-      videoUrl: "https://videos.pexels.com/video-files/3819777/3819777-hd_1920_1080_25fps.mp4", // Laughing people
+      imageUrl: "https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "The Improv Place"
     },
@@ -396,7 +277,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.fremontabbey.org/events/",
       price: "Varies",
       organizer: "Fremont Abbey",
-      videoUrl: "https://videos.pexels.com/video-files/4039165/4039165-hd_1920_1080_25fps.mp4", // Acoustic vibe
+      imageUrl: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Fremont Abbey"
     },
@@ -411,7 +292,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://wearespin.com/location/seattle/",
       price: "Varies",
       organizer: "SPIN",
-      videoUrl: "https://videos.pexels.com/video-files/4270273/4270273-hd_1080_1920_30fps.mp4", // Dancing/Party vibe
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "SPIN"
     },
@@ -426,7 +307,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://tractortavern.com/calendar/",
       price: "Varies",
       organizer: "Tractor Tavern",
-      videoUrl: "https://videos.pexels.com/video-files/1443564/1443564-hd_1920_1080_30fps.mp4", // Folk Guitar
+      imageUrl: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Tractor Tavern"
     },
@@ -441,7 +322,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.fountainheadgallery.com/fountainhead-presents",
       price: "Free",
       organizer: "Fountainhead Gallery",
-      videoUrl: "https://videos.pexels.com/video-files/3754968/3754968-hd_1920_1080_25fps.mp4", // Gallery
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Fountainhead"
     },
@@ -456,7 +337,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://stoningtongallery.com/exhibit/michael-nicoll-yahgulanaas/",
       price: "Free",
       organizer: "Stonington Gallery",
-      videoUrl: "https://videos.pexels.com/video-files/5533358/5533358-hd_1080_1920_30fps.mp4", // Sculpture/Art
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Stonington"
     },
@@ -471,7 +352,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.seattlerep.org/plays/202526-season/here-there-are-blueberries",
       price: "Tickets Required",
       organizer: "Seattle Rep",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4", // Theater
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Seattle Rep"
     },
@@ -486,7 +367,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.siff.net/programs-and-events",
       price: "Varies",
       organizer: "SIFF",
-      videoUrl: "https://videos.pexels.com/video-files/2759477/2759477-hd_1920_1080_30fps.mp4", // Abstract/Screen
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "SIFF"
     },
@@ -501,7 +382,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.mlb.com/mariners/ballpark/tours",
       price: "$15+",
       organizer: "Seattle Mariners",
-      videoUrl: "https://videos.pexels.com/video-files/855564/855564-hd_1280_720_24fps.mp4", // Stadium
+      imageUrl: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Mariners"
     },
@@ -516,7 +397,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.chophouserow.com/events/yoga-with-jennifer-isaacson-x-sweatbox",
       price: "Varies",
       organizer: "Chophouse Row",
-      videoUrl: "https://videos.pexels.com/video-files/3759654/3759654-hd_1920_1080_25fps.mp4", // Yoga
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Chophouse Row"
     },
@@ -531,7 +412,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.chophouserow.com/events/stitch-and-poke-maker-meetup",
       price: "Free",
       organizer: "Chophouse Row",
-      videoUrl: "https://videos.pexels.com/video-files/7653773/7653773-hd_1080_1920_25fps.mp4", // Sewing
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Chophouse Row"
     },
@@ -546,7 +427,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.chophouserow.com/events/celine-waldmann-studio-kaylee-davis-feb1",
       price: "Free",
       organizer: "Chophouse Row",
-      videoUrl: "https://videos.pexels.com/video-files/1779207/1779207-hd_1920_1080_25fps.mp4", // Painting
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Chophouse Row"
     },
@@ -561,7 +442,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.friendmuseum.com/events-classes-popups",
       price: "Varies",
       organizer: "Friend Museum",
-      videoUrl: "https://videos.pexels.com/video-files/4988587/4988587-hd_1080_1920_30fps.mp4", // Pottery/Craft
+      imageUrl: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Friend Museum"
     },
@@ -576,7 +457,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.instagram.com/p/DT0uleaDH74/",
       price: "Free",
       organizer: "IG Spotlight",
-      videoUrl: "https://videos.pexels.com/video-files/5848777/5848777-hd_1080_1920_30fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'bolt', primaryColor: '#E1306C', hat: 'cap', outfit: 'jacket', glasses: 'sunnies', skinTone: '#fca5a5' }
     },
     {
@@ -590,7 +471,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.facebook.com/reel/1206838077633415",
       price: "Free",
       organizer: "Social Spotlight",
-      videoUrl: "https://videos.pexels.com/video-files/4990396/4990396-hd_1080_1920_30fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'bolt', primaryColor: '#1877F2', hat: 'backwards', outfit: 'hoodie', glasses: 'sunnies', skinTone: '#eac086' }
     },
     {
@@ -604,7 +485,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.tuli-lodge.com/",
       price: "From $35",
       organizer: "Tuli Lodge",
-      videoUrl: "https://videos.pexels.com/video-files/4496262/4496262-hd_1080_1920_25fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'beanie', outfit: 'none', skinTone: '#fca5a5' }
     },
     {
@@ -618,7 +499,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://thewildhaus.com/",
       price: "Varies",
       organizer: "The Wild Haus",
-      videoUrl: "https://videos.pexels.com/video-files/5848777/5848777-hd_1080_1920_30fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'bolt', primaryColor: '#facc15', hat: 'cap', outfit: 'jacket', glasses: 'sunnies', skinTone: '#eac086' }
     },
     {
@@ -632,7 +513,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://vonsauna.co/",
       price: "$$",
       organizer: "Von Sauna",
-      videoUrl: "https://videos.pexels.com/video-files/3759654/3759654-hd_1920_1080_25fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'ghost', primaryColor: '#fb923c', hat: 'none', outfit: 'none', skinTone: '#d2996e' }
     },
     {
@@ -646,7 +527,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://boulderingproject.com/",
       price: "$25",
       organizer: "SBP",
-      videoUrl: "https://videos.pexels.com/video-files/6642732/6642732-hd_1080_1920_25fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'bolt', primaryColor: '#ef4444', hat: 'backwards', outfit: 'tee', skinTone: '#9f7959' }
     },
     {
@@ -660,7 +541,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.seattlesauna.com/",
       price: "From $45",
       organizer: "Seattle Sauna Co",
-      videoUrl: "https://videos.pexels.com/video-files/853906/853906-hd_1920_1080_30fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'duck', primaryColor: '#22d3ee', hat: 'none', outfit: 'none', skinTone: '#ffe0bd' }
     },
     {
@@ -674,7 +555,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.gooddaysauna.com/",
       price: "$$",
       organizer: "Good Day",
-      videoUrl: "https://videos.pexels.com/video-files/4496262/4496262-hd_1080_1920_25fps.mp4",
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       vibemoji: { baseId: 'pizza', primaryColor: '#facc15', hat: 'bucket', outfit: 'none', skinTone: '#eac086' }
     },
     {
@@ -688,7 +569,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://rendezvous.squarespace.com/events",
       price: "Varies",
       organizer: "The Rendezvous",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/713149/pexels-photo-713149.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#f87171', hat: 'none', outfit: 'jacket', glasses: 'retro', skinTone: '#ffe0bd' }
     },
@@ -703,7 +583,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://sn.web.ticketing.siaticketing.com/attractions",
       price: "$$$",
       organizer: "Space Needle",
-      videoUrl: "https://videos.pexels.com/video-files/5049303/5049303-hd_1920_1080_24fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3121459/pexels-photo-3121459.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#22d3ee', hat: 'none', outfit: 'jacket', glasses: 'sunnies', skinTone: '#eac086' }
     },
@@ -718,7 +597,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://jetcityimprov.my.salesforce-sites.com/ticket/PatronTicket__PublicTicketApp#/",
       price: "$18",
       organizer: "Jet City Improv",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/713149/pexels-photo-713149.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#facc15', hat: 'beanie', outfit: 'hoodie', expression: 'happy', skinTone: '#fca5a5' }
     },
@@ -733,7 +611,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.ticketweb.com/venue/the-crocodile-seattle-wa/10352",
       price: "Varies",
       organizer: "The Crocodile",
-      videoUrl: "https://videos.pexels.com/video-files/4725049/4725049-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#ef4444', hat: 'cap', outfit: 'jacket', glasses: 'star', skinTone: '#d2996e' }
     },
@@ -742,13 +619,12 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       title: "Sound Off! 2025",
       date: "Coming Soon",
       location: "MoPOP",
-      description: "The Pacific Northwest’s premier 21-and-under music showcase. Support local youth talent.",
+      description: "The Pacific Northwest's premier 21-and-under music showcase. Support local youth talent.",
       category: "music",
       vibeTags: ["#livemusic", "#showcase", "#allages"],
       link: "https://www.mopop.org/programs/sound-off?fbclid=IwY2xjawPdQiJleHRuA2FlbQEwAGFkaWQBqyqY6_4MXXNydGMGYXBwX2lkEDIyMjAzOTE3ODgyMDA4OTIAAR4sMsKPdkLS0baZUNlY1Ik63sDw5Y1PlVJ3m06qBJwR01Zn8eMt-vUsRpb8dg_aem_lIKPWoNnxbAp4s5_ETzvaw#tickets",
       price: "From $20",
       organizer: "MoPOP",
-      videoUrl: "https://videos.pexels.com/video-files/4725049/4725049-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#ec4899', hat: 'beanie', outfit: 'jacket', skinTone: '#fca5a5' }
     },
@@ -763,7 +639,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://yambambosalsa.com/shows/",
       price: "Varies",
       organizer: "Yambambo",
-      videoUrl: "https://videos.pexels.com/video-files/4270273/4270273-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/12312/pexels-photo-12312.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#ef4444', hat: 'none', outfit: 'tee', skinTone: '#eac086' }
     },
@@ -778,7 +653,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.pnwneighborhoodmarkets.com/events/event-one-28nrh",
       price: "Free",
       organizer: "PNW Markets",
-      videoUrl: "https://videos.pexels.com/video-files/3206275/3206275-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1855214/pexels-photo-1855214.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'bucket', outfit: 'flannel', skinTone: '#fca5a5' }
     },
@@ -793,7 +667,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://puppy-yogaclub.com/products/seattle",
       price: "From $45",
       organizer: "Puppy Yoga Club",
-      videoUrl: "https://videos.pexels.com/video-files/3759654/3759654-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/4056535/pexels-photo-4056535.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#facc15', hat: 'halo', outfit: 'tee', skinTone: '#fca5a5' }
     },
@@ -808,7 +681,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://puppies-yoga.com/products/seattle-studio-2?variant=53012672414036",
       price: "$35+",
       organizer: "Puppies & Yoga",
-      videoUrl: "https://videos.pexels.com/video-files/6644265/6644265-hd_1080_1920_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3760259/pexels-photo-3760259.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#60a5fa', hat: 'none', outfit: 'hoodie', skinTone: '#ffe0bd' }
     },
@@ -823,7 +695,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.ticketmaster.com/discover/seattle?categoryId=KZFzniwnSyZfZ7v7nE",
       price: "From $60",
       organizer: "Seattle Kraken",
-      videoUrl: "https://videos.pexels.com/video-files/855564/855564-hd_1280_720_24fps.mp4",
       imageUrl: "https://images.pexels.com/photos/976873/pexels-photo-976873.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#99D9D9', hat: 'beanie', outfit: 'hoodie', skinTone: '#fca5a5' }
     },
@@ -838,7 +709,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://bonsaibar.com/collections/washington",
       price: "From $75",
       organizer: "Bonsai Bar",
-      videoUrl: "https://videos.pexels.com/video-files/4505456/4505456-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3015488/pexels-photo-3015488.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'beanie', outfit: 'flannel', skinTone: '#eac086' }
     },
@@ -853,7 +723,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://loftontheave.com/collections/sewing-design-classes",
       price: "Varies",
       organizer: "Loft on the Ave",
-      videoUrl: "https://videos.pexels.com/video-files/4624915/4624915-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1908658/pexels-photo-1908658.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#facc15', hat: 'cap', outfit: 'tee', skinTone: '#ffe0bd' }
     },
@@ -868,7 +737,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.tamaribarseattle.com/happy-hour-1",
       price: "No Cover",
       organizer: "Tamari Bar",
-      videoUrl: "https://videos.pexels.com/video-files/8523126/8523126-hd_1080_1920_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3205934/pexels-photo-3205934.jpeg",
       vibemoji: { baseId: 'pizza', primaryColor: '#fb923c', hat: 'none', outfit: 'none', skinTone: '#d2996e' }
     },
@@ -883,7 +751,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://populusseattle.com/events-calendar/",
       price: "Free/Varies",
       organizer: "Populus Seattle",
-      videoUrl: "https://videos.pexels.com/video-files/2083652/2083652-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3754968/pexels-photo-3754968.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#a78bfa', hat: 'bucket', outfit: 'tee', glasses: 'retro', skinTone: '#fca5a5' }
     },
@@ -898,7 +765,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://seattle.gov/parks",
       price: "Free",
       organizer: "Seattle Parks",
-      videoUrl: "https://videos.pexels.com/video-files/3363843/3363843-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3327672/pexels-photo-3327672.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'cap', outfit: 'hoodie', expression: 'chill', skinTone: '#684b39' }
     },
@@ -913,7 +779,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.kremwerk.com/",
       price: "$15-25",
       organizer: "Kremwerk",
-      videoUrl: "https://videos.pexels.com/video-files/3196377/3196377-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1587927/pexels-photo-1587927.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#ec4899', hat: 'none', outfit: 'jacket', glasses: 'star', skinTone: '#9f7959' }
     },
@@ -928,7 +793,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://thebarboza.com/",
       price: "$12",
       organizer: "Barboza",
-      videoUrl: "https://videos.pexels.com/video-files/2034810/2034810-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'arcade', primaryColor: '#a78bfa', hat: 'cap', outfit: 'tee', glasses: 'nerd', skinTone: '#fca5a5' }
     },
@@ -943,7 +807,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.fremontmarket.com/",
       price: "Free",
       organizer: "Fremont Market",
-      videoUrl: "https://videos.pexels.com/video-files/3206275/3206275-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1855214/pexels-photo-1855214.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#facc15', hat: 'beanie', outfit: 'flannel', skinTone: '#3f2e26' }
     },
@@ -958,7 +821,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.mbarseattle.com/",
       price: "No Cover",
       organizer: "Mbar",
-      videoUrl: "https://videos.pexels.com/video-files/5049303/5049303-hd_1920_1080_24fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3121459/pexels-photo-3121459.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#22d3ee', hat: 'none', outfit: 'jacket', glasses: 'sunnies', skinTone: '#ffe0bd' }
     },
@@ -973,7 +835,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://pacificsciencecenter.org/visit/laser-dome/",
       price: "$15",
       organizer: "PacSci",
-      videoUrl: "https://videos.pexels.com/video-files/2759477/2759477-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/2422259/pexels-photo-2422259.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#a78bfa', hat: 'halo', outfit: 'none', skinTone: '#d2996e' }
     },
@@ -988,7 +849,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.ddir.com/",
       price: "$",
       organizer: "Dick's",
-      videoUrl: "https://videos.pexels.com/video-files/2620043/2620043-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1633578/pexels-photo-1633578.jpeg",
       vibemoji: { baseId: 'pizza', primaryColor: '#fb923c', hat: 'cap', outfit: 'hoodie', skinTone: '#eac086' }
     },
@@ -1003,7 +863,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.thecrocodile.com/",
       price: "$20",
       organizer: "The Crocodile",
-      videoUrl: "https://videos.pexels.com/video-files/4725049/4725049-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#ef4444', hat: 'none', outfit: 'jacket', skinTone: '#fca5a5' }
     },
@@ -1018,7 +877,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.laughscomedy.com/",
       price: "$10",
       organizer: "Laughs Comedy",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/713149/pexels-photo-713149.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#facc15', hat: 'beanie', outfit: 'hoodie', skinTone: '#eac086' }
     },
@@ -1033,7 +891,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.georgetownartattack.com/",
       price: "Free",
       organizer: "Georgetown Merchants",
-      videoUrl: "https://videos.pexels.com/video-files/3975549/3975549-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3754968/pexels-photo-3754968.jpeg",
       vibemoji: { baseId: 'arcade', primaryColor: '#a78bfa', hat: 'bucket', outfit: 'tee', glasses: 'retro', skinTone: '#9f7959' }
     },
@@ -1048,7 +905,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.sfmamarkets.com/ballard-farmers-market",
       price: "Free",
       organizer: "SFMA",
-      videoUrl: "https://videos.pexels.com/video-files/3206275/3206275-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1855214/pexels-photo-1855214.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'cap', outfit: 'flannel', skinTone: '#ffe0bd' }
     },
@@ -1063,7 +919,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.neumos.com/",
       price: "$25",
       organizer: "Neumos",
-      videoUrl: "https://videos.pexels.com/video-files/2034810/2034810-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#ec4899', hat: 'backwards', outfit: 'hoodie', glasses: 'sunnies', skinTone: '#d2996e' }
     },
@@ -1078,7 +933,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.jazzalley.com/",
       price: "From $35",
       organizer: "Jazz Alley",
-      videoUrl: "https://videos.pexels.com/video-files/7504383/7504383-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/1443564/pexels-photo-1443564.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#facc15', hat: 'none', outfit: 'jacket', skinTone: '#684b39' }
     },
@@ -1093,7 +947,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.seattle.gov/parks",
       price: "Free",
       organizer: "Seattle Parks",
-      videoUrl: "https://videos.pexels.com/video-files/8760971/8760971-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3327672/pexels-photo-3327672.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#34d399', hat: 'cap', outfit: 'tee', skinTone: '#fca5a5' }
     },
@@ -1108,7 +961,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://ratcityrollerderby.com/",
       price: "$20",
       organizer: "RCRD",
-      videoUrl: "https://videos.pexels.com/video-files/4492795/4492795-hd_1080_1920_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/209875/pexels-photo-209875.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#ec4899', hat: 'none', outfit: 'tee', glasses: 'star', skinTone: '#ffe0bd' }
     },
@@ -1123,7 +975,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.nwoc.com/",
       price: "$40",
       organizer: "NWOC",
-      videoUrl: "https://videos.pexels.com/video-files/853906/853906-hd_1920_1080_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/635279/pexels-photo-635279.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#22d3ee', hat: 'beanie', outfit: 'jacket', skinTone: '#9f7959' }
     },
@@ -1138,7 +989,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://fryemuseum.org/",
       price: "Free",
       organizer: "Frye Art Museum",
-      videoUrl: "https://videos.pexels.com/video-files/1779207/1779207-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/2123337/pexels-photo-2123337.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#a78bfa', hat: 'none', outfit: 'none', glasses: 'retro', skinTone: '#eac086' }
     },
@@ -1153,7 +1003,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://qnightclub.com/",
       price: "$20-40",
       organizer: "Q Nightclub",
-      videoUrl: "https://videos.pexels.com/video-files/4990396/4990396-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/3196377/pexels-photo-3196377.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#60a5fa', hat: 'none', outfit: 'tee', glasses: 'sunnies', skinTone: '#fca5a5' }
     },
@@ -1168,7 +1017,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.honeycourt.com/",
       price: "$$",
       organizer: "Honey Court",
-      videoUrl: "https://videos.pexels.com/video-files/5820987/5820987-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/8523126/pexels-photo-8523126.jpeg",
       vibemoji: { baseId: 'pizza', primaryColor: '#fb923c', hat: 'none', outfit: 'hoodie', skinTone: '#d2996e' }
     },
@@ -1183,7 +1031,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.siff.net/",
       price: "$14",
       organizer: "SIFF",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/713149/pexels-photo-713149.jpeg",
       vibemoji: { baseId: 'arcade', primaryColor: '#f87171', hat: 'cap', outfit: 'jacket', glasses: 'nerd', skinTone: '#fca5a5' }
     },
@@ -1198,7 +1045,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://highdiveseattle.com/",
       price: "$15",
       organizer: "High Dive",
-      videoUrl: "https://videos.pexels.com/video-files/4725049/4725049-hd_1080_1920_30fps.mp4",
       imageUrl: "https://images.pexels.com/photos/167636/pexels-photo-167636.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#34d399', hat: 'beanie', outfit: 'flannel', skinTone: '#ffe0bd' }
     },
@@ -1213,7 +1059,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://seattleboulderingproject.com/",
       price: "$25",
       organizer: "SBP",
-      videoUrl: "https://videos.pexels.com/video-files/6642732/6642732-hd_1080_1920_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/4057317/pexels-photo-4057317.jpeg",
       vibemoji: { baseId: 'bolt', primaryColor: '#facc15', hat: 'backwards', outfit: 'tee', skinTone: '#9f7959' }
     },
@@ -1228,7 +1073,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.sofarsounds.com/cities/seattle",
       price: "$25",
       organizer: "Sofar Sounds",
-      videoUrl: "https://videos.pexels.com/video-files/4039165/4039165-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/210922/pexels-photo-210922.jpeg",
       vibemoji: { baseId: 'ghost', primaryColor: '#ec4899', hat: 'beanie', outfit: 'flannel', skinTone: '#fca5a5' }
     },
@@ -1243,7 +1087,6 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.stgpresents.org/paramount",
       price: "From $45",
       organizer: "STG Presents",
-      videoUrl: "https://videos.pexels.com/video-files/7123986/7123986-hd_1920_1080_25fps.mp4",
       imageUrl: "https://images.pexels.com/photos/713149/pexels-photo-713149.jpeg",
       vibemoji: { baseId: 'duck', primaryColor: '#f87171', hat: 'crown', outfit: 'jacket', skinTone: '#ffe0bd' }
     },
@@ -1258,7 +1101,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.visitmirra.com/calendar",
       price: "Varies",
       organizer: "Mirra",
-      videoUrl: "https://videos.pexels.com/video-files/3163534/3163534-hd_1920_1080_30fps.mp4", // Neon/Future vibe
+      imageUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Visit Mirra"
     },
@@ -1273,7 +1116,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.beherenowseattle.com/schedule",
       price: "Varies",
       organizer: "Be Here Now",
-      videoUrl: "https://videos.pexels.com/video-files/3194277/3194277-hd_1920_1080_25fps.mp4", // Meditation vibe
+      imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Be Here Now"
     },
@@ -1288,7 +1131,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.adventuresinseattle.com/#hiking-adventures",
       price: "$$$",
       organizer: "Adventures in Seattle",
-      videoUrl: "https://videos.pexels.com/video-files/1959771/1959771-hd_1920_1080_25fps.mp4", // Hiking vibe
+      imageUrl: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Adventures in Seattle"
     },
@@ -1303,7 +1146,7 @@ export const FEATURED_EVENTS: KickflipEvent[] = [
       link: "https://www.theodora.wine/events?utm_source=ig&utm_medium=social&utm_content=link_in_bio&fbclid=PAdGRleAPmMfxleHRuA2FlbQIxMQBzcnRjBmFwcF9pZA8xMjQwMjQ1NzQyODc0MTQAAacb3R9uD2KDCkVBQv2D75CcWSLr7WyUsW4nMOKNkOrmfWXdNMNsS-moOEr_9g_aem_0Kx3cP-TuMrs2eJM6H05tA",
       price: "Varies",
       organizer: "Theodora",
-      videoUrl: "https://videos.pexels.com/video-files/3752668/3752668-hd_1920_1080_24fps.mp4", // Wine
+      imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800&fit=crop&auto=format",
       origin: "crawl",
       crawlSource: "Theodora"
     }

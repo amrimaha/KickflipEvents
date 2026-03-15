@@ -1,7 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { KickflipEvent } from "../types";
-import { DEFAULT_SYSTEM_INSTRUCTION, FEATURED_EVENTS, getVideoForEvent } from "../constants";
+import { DEFAULT_SYSTEM_INSTRUCTION, FEATURED_EVENTS } from "../constants";
 
 // Lazy initialization pattern to avoid top-level crashes if environment is not yet ready
 const getAI = () => {
@@ -138,8 +138,7 @@ export const searchSeattleEvents = async (
             const eventId = `discovered-${Date.now()}-${index}`;
             // Ensure category is safe
             const safeCategory = e.category || 'other';
-            const categoryVideo = getVideoForEvent(safeCategory, eventId);
-            
+
             // Return safe object structure to prevent render crashes
             return {
                 ...e,
@@ -154,7 +153,7 @@ export const searchSeattleEvents = async (
                 startDate: e.startDate || null,
                 startTime: e.startTime || null,
                 date: e.date || "Upcoming",
-                videoUrl: e.videoUrl || categoryVideo,
+                videoUrl: e.videoUrl || undefined, // No Pexels video fallback — use imageUrl instead
                 price: e.price || "",
                 link: e.link || "#"
             };
