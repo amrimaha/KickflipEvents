@@ -772,17 +772,35 @@ app.post('/api/chat', async (req, res) => {
       console.log(`[chat:${reqId}] STEP 5 — no DB match, triggering web search`);
       const wsResult = await discoverWithWebSearch(query, currentDateTime);
       console.log(`[chat:${reqId}] STEP 5 — web search returned ${wsResult?.events?.length ?? 0} events`);
-      const rawEvents = (wsResult.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
+      let rawEvents = (wsResult.events || []).map((e, i) => { if (!e.id) e.id = `result-${Date.now()}-${i}`; return e; });
       if (rawEvents.length > 0) {
         storeDiscoveredEvents(rawEvents).catch(err =>
           console.warn(`[chat:${reqId}] background store error (non-fatal):`, err.message)
         );
       }
-      await saveCache(queryHash, query, rawEvents.map(e => e.id), wsResult.text || '');
+
+      // ── ④e Chronological fallback — never show an empty feed ──────────
+      let finalText = wsResult.text || 'Scouting the Seattle scene...';
+      if (rawEvents.length === 0) {
+        console.log(`[chat:${reqId}] STEP 6 — web search empty, falling back to chronological`);
+        try {
+          const fallbackEvents = await searchChronological({}, 8);
+          if (fallbackEvents.length > 0) {
+            rawEvents = fallbackEvents;
+            const noResultLine = wsResult.text ? `${wsResult.text} ` : '';
+            finalText = `${noResultLine}Here's what's coming up in Seattle:`;
+            console.log(`[chat:${reqId}] STEP 6 — chronological fallback returned ${rawEvents.length} events`);
+          }
+        } catch (fallbackErr) {
+          console.warn(`[chat:${reqId}] STEP 6 — chronological fallback failed: ${fallbackErr.message}`);
+        }
+      }
+
+      await saveCache(queryHash, query, rawEvents.map(e => e.id), finalText);
       const totalMs = Date.now() - t0;
       console.log(`[chat:${reqId}] DONE (websearch) — ${rawEvents.length} events, ${totalMs}ms`);
-      sendStreamResult(res, wsResult.text || 'Scouting the Seattle scene...', rawEvents);
-      saveConversation({ userId: user_id, query, aiText: wsResult.text, events: rawEvents, source: 'websearch' }).catch(() => {});
+      sendStreamResult(res, finalText, rawEvents);
+      saveConversation({ userId: user_id, query, aiText: finalText, events: rawEvents, source: 'websearch' }).catch(() => {});
       trackRequest({ endpoint: '/api/chat', userId: user_id || null, responseTimeMs: totalMs, statusCode: 200, source: 'websearch' });
       return;
     }
