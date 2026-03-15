@@ -288,19 +288,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 style={{ borderColor: accentColor }}
                 onClick={() => avatarInputRef.current?.click()}
               >
-                {avatarUrl ? (
+                {/* Initials always rendered as fallback background */}
+                <div
+                  className="absolute inset-0 flex items-center justify-center text-3xl font-black text-white"
+                  style={{ backgroundColor: accentColor + '33' }}
+                >
+                  {initials}
+                </div>
+                {/* Photo overlaid — hidden via onError if URL fails to load */}
+                {avatarUrl && (
                   <img
                     src={avatarUrl}
                     alt={user.name}
-                    className="w-full h-full object-cover group-hover/avatar:scale-105 transition-transform duration-300"
+                    className="absolute inset-0 w-full h-full object-cover group-hover/avatar:scale-105 transition-transform duration-300"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
-                ) : (
-                  <div
-                    className="w-full h-full flex items-center justify-center text-3xl font-black text-white"
-                    style={{ backgroundColor: accentColor + '33' }}
-                  >
-                    {initials}
-                  </div>
                 )}
                 {/* Camera overlay on hover */}
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">

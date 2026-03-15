@@ -491,6 +491,11 @@ const App: React.FC = () => {
         
         const existingStored = sessionStorage.getItem('kickflip_user');
         const finalUser = existingStored ? { ...JSON.parse(existingStored), ...authenticatedUser } : authenticatedUser;
+        // Restore persisted profile photo if user has uploaded one before
+        if (!finalUser.profilePhotoUrl && authenticatedUser.id) {
+          const savedPhoto = localStorage.getItem(`kickflip_profile_photo_${authenticatedUser.id}`);
+          if (savedPhoto) finalUser.profilePhotoUrl = savedPhoto;
+        }
 
         setCreatedEvents(prev => {
             const updated = prev.map(evt => {
@@ -524,6 +529,11 @@ const App: React.FC = () => {
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
+        // Restore persisted profile photo (survives tab close, keyed by user ID)
+        if (parsed.id && !parsed.profilePhotoUrl) {
+          const savedPhoto = localStorage.getItem(`kickflip_profile_photo_${parsed.id}`);
+          if (savedPhoto) parsed.profilePhotoUrl = savedPhoto;
+        }
         setUser(parsed);
         // Onboarding disabled — restore by uncommenting below
         // if (!parsed.onboardingPreferences?.completed) { setShowOnboarding(true); }
@@ -704,6 +714,14 @@ const App: React.FC = () => {
         const updatedUser = { ...user, ...updates };
         setUser(updatedUser);
         sessionStorage.setItem('kickflip_user', JSON.stringify(updatedUser));
+        // Persist uploaded profile photo to localStorage so it survives tab close
+        if ('profilePhotoUrl' in updates && user.id) {
+            if (updates.profilePhotoUrl) {
+                localStorage.setItem(`kickflip_profile_photo_${user.id}`, updates.profilePhotoUrl);
+            } else {
+                localStorage.removeItem(`kickflip_profile_photo_${user.id}`);
+            }
+        }
     }
   };
 
