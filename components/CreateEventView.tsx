@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { EventDraft, KickflipEvent, VibemojiConfig } from '../types';
-import { CATEGORY_COLORS, CATEGORY_VIDEOS_MAP, DEFAULT_INITIAL_DRAFT } from '../constants';
+import { CATEGORY_COLORS, DEFAULT_INITIAL_DRAFT } from '../constants';
 import { EventCard } from './EventCard';
 
 interface CreateEventViewProps {
@@ -54,12 +54,15 @@ const getLocalISO = (d: Date = new Date()) => {
 export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onCancel, initialDraft }) => {
   // ROBUST INITIALIZATION: Deep merge with default to ensure no fields (like media array) are missing
   const [draft, setDraft] = useState<EventDraft>(() => {
-      if (!initialDraft) return DEFAULT_INITIAL_DRAFT;
+      // Use local timezone for default dates to prevent UTC off-by-one-day bug
+      const defaultDate = getLocalISO(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      const base: EventDraft = { ...DEFAULT_INITIAL_DRAFT, startDate: defaultDate, endDate: defaultDate };
+      if (!initialDraft) return base;
       return {
-          ...DEFAULT_INITIAL_DRAFT,
+          ...base,
           ...initialDraft,
           // Explicitly ensure nested objects/arrays exist if missing in legacy data
-          media: initialDraft.media || [], 
+          media: initialDraft.media || [],
           vibemoji: { ...DEFAULT_INITIAL_DRAFT.vibemoji, ...(initialDraft.vibemoji || {}) }
       };
   });
@@ -180,9 +183,15 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
       else if (has(['sports', 'game', 'match', 'football', 'soccer', 'basketball', 'baseball', 'hockey', 'seahawks', 'kraken', 'mariners', 'sounders', 'huskies', 'stadium'])) { category = 'sports'; themeColor = CATEGORY_COLORS.sports; hat = 'cap'; outfit = 'tee'; pants = 'shorts'; expression = 'hype'; }
       else if (has(['comedy', 'standup', 'stand-up', 'improv', 'laugh', 'joke', 'funny', 'comedian'])) { category = 'comedy'; themeColor = CATEGORY_COLORS.comedy; hat = 'beanie'; outfit = 'hoodie'; expression = 'happy'; glasses = 'nerd'; }
       
+      // Smart title: filter stop words + generic event words, pick 2 vivid nouns/adjectives + category suffix
+      const STOP_WORDS = new Set(['want','will','have','that','this','with','from','they','there','about','which','where','when','into','over','also','some','just','what','like','then','more','very','much','such','even','well','most','would','could','should','their','other','these','those','both','each','many','after','before','while','being','doing','going','come','take','make','know','look','think','give','starting','featuring','planning','hosting','located','event','events','night','thing','said','good','back','time','year','great','little','right','still','made','place','hand','high','part','help','hold','turn','open','next','week','last','long','same','late','late','dear','away','done','full','life','live','play','real','runs','show','side','feel','keep','left','seen','read','tell','used','ways','goes','lets','puts','told','well','gets','seen','area','able','want','need','find','here','from','them','your','been','were','when','just','than','only','over','then','into','also','back','came','each','most','much','near','once','upon','went','with','said','take','will','have','this','that','they','what','from','into','than','also','some','more','make','know','look','even','well','many','give','most','only','such','does','says','tell','each','less','ever','very','must','need','felt','help','feel','come','seem','kind','kept','half','else','done','goes']);
+      const GENERIC_WORDS = new Set(['dance','music','food','event','party','show','night','drop','secret','having','really','about','after','again','where','there','these','those','other','being','going']);
+      const CATEGORY_SUFFIXES: Record<string, string> = { party:'Night', music:'Session', art:'Collective', food:'Feast', wellness:'Ritual', outdoor:'Wild', comedy:'Laughs', sports:'Day', fashion:'Drop', other:'Experience' };
       const cleanConcept = cLower.replace(/[^\w\s]|_/g, ' ').replace(/\s+/g, ' ');
-      const contentWords = cleanConcept.trim().split(' ').filter(w => w.length > 3);
-      suggestedTitle = contentWords.slice(0, 3).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Untitled Drop';
+      const contentWords = cleanConcept.trim().split(' ').filter((w: string) => w.length >= 4 && !STOP_WORDS.has(w) && !GENERIC_WORDS.has(w));
+      const titleWords = contentWords.slice(0, 2).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1));
+      const suffix = CATEGORY_SUFFIXES[category] || 'Experience';
+      suggestedTitle = titleWords.length >= 2 ? `${titleWords.join(' ')} ${suffix}` : titleWords.length === 1 ? `${titleWords[0]} ${suffix}` : 'Untitled Drop';
       
       // --- EXTRACTION MAGIC (Date, Time, Location, Price) ---
       let detectedLocation = '';
@@ -527,8 +536,9 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
               <div className="bg-white/5 p-8 rounded-[2rem] border border-white/10 space-y-8">
                  <div className="flex justify-between items-center">
                     <label className="text-[10px] font-black text-white/40 uppercase tracking-widest">Entry Fee?</label>
-                    <button onClick={() => setDraft({...draft, isFree: !draft.isFree})} className={`w-12 h-7 rounded-full relative transition-colors ${draft.isFree ? 'bg-green-500' : 'bg-white/10'}`}>
-                       <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${draft.isFree ? 'left-6' : 'left-1'}`} />
+                    {/* Toggle ON (green) = has entry fee (isFree=false); Toggle OFF = free event (isFree=true) */}
+                    <button onClick={() => setDraft({...draft, isFree: !draft.isFree})} className={`w-12 h-7 rounded-full relative transition-colors ${!draft.isFree ? 'bg-green-500' : 'bg-white/10'}`}>
+                       <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${!draft.isFree ? 'left-6' : 'left-1'}`} />
                     </button>
                  </div>
                  {!draft.isFree && (
@@ -599,8 +609,9 @@ export const CreateEventView: React.FC<CreateEventViewProps> = ({ onPublish, onC
                   <textarea value={draft.overview} onChange={(e) => setDraft({...draft, overview: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-6 text-white focus:outline-none h-64 font-medium leading-relaxed" />
               </div>
            </section>
-           <div className="pt-12 border-t border-white/10">
+           <div className="pt-12 border-t border-white/10 flex flex-col gap-3">
               <button onClick={() => onPublish(draft)} className="w-full py-6 rounded-3xl text-black font-black text-xl uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all shadow-2xl shadow-white/5" style={{backgroundColor: draft.themeColor}}>{initialDraft ? 'Update Live Drop' : 'Launch Drop'}</button>
+              <button onClick={() => onPublish({...draft, status: 'draft'})} className="w-full py-4 rounded-3xl text-white/50 font-black text-sm uppercase tracking-widest border border-white/10 hover:border-white/30 hover:text-white transition-all bg-white/5">Save as Draft</button>
            </div>
         </div>
       </div>
