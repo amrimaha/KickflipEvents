@@ -1772,6 +1772,238 @@ SEARCH METHOD: ${convo.source || 'unknown'}`,
   }
 });
 
+// ─── Provider Dashboard Stats ────────────────────────────────────────────────
+//
+// GET /api/dashboard/provider-stats?userId=xxx
+// Returns events created + tickets sold for a specific provider (user).
+// Events are queried from kickflip_events where origin='user' and creator_id matches.
+// ticketsSold is stored in payload.ticketsSold (set on publish in App.tsx).
+
+app.get('/api/dashboard/provider-stats', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || typeof userId !== 'string') {
+    return res.status(400).json({ error: 'userId query param required' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('kickflip_events')
+      .select('id, payload, status')
+      .eq('origin', 'user')
+      .eq('creator_id', userId);
+
+    if (error) throw new Error(error.message);
+
+    const events = data || [];
+    const ticketsSold = events.reduce((sum, e) => {
+      const sold = parseInt((e.payload?.ticketsSold ?? 0), 10);
+      return sum + (isNaN(sold) ? 0 : sold);
+    }, 0);
+
+    return res.json({
+      eventsCreated: events.length,
+      ticketsSold,
+    });
+  } catch (err) {
+    console.error('[dashboard/provider-stats] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ─── Analytics Batch Job ──────────────────────────────────────────────────────
+//
+// POST /api/analytics/refresh
+//   — Triggered by Railway cron (daily 3am) via Authorization: Bearer <CRON_SECRET>
+//   — Also callable ad hoc from the dashboard UI (same endpoint, same auth)
+//
+// Computes and stores three analytics snapshots in analytics_snapshots:
+//   1. neighborhoods    — top 5 event-dense venue/neighborhoods from kickflip_events
+//   2. avg_ticket_price — average ticket price from non-free active events
+//   3. category_trends  — top 3 + bottom 3 categories by clickstream click volume (last 30 days)
+//
+// The dashboard reads these via GET /api/analytics/latest (no auth required).
+
+app.post('/api/analytics/refresh', async (req, res) => {
+  // Allow both cron (Bearer token) and dashboard ad-hoc (no auth but same endpoint)
+  // For production, tighten this if you want dashboard-only ad-hoc.
+  const authHeader = req.headers['authorization'];
+  const isAuthorizedCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isDashboard = req.headers['x-kickflip-source'] === 'dashboard';
+
+  if (!isAuthorizedCron && !isDashboard) {
+    return res.status(401).json({ error: 'Unauthorized — use CRON_SECRET or x-kickflip-source: dashboard header' });
+  }
+
+  try {
+    const results = {};
+
+    // ── 1. Top 5 Event-Dense Neighborhoods ─────────────────────────────────
+    // Fetch venue + city from all active events. Group by normalized venue/city in JS.
+    const { data: eventLocations, error: locErr } = await supabase
+      .from('kickflip_events')
+      .select('venue, city, address, payload')
+      .eq('is_active', true)
+      .limit(2000);
+
+    if (locErr) throw new Error('neighborhood fetch: ' + locErr.message);
+
+    const neighborhoodCounts = {};
+    for (const e of eventLocations || []) {
+      // Priority: venue → payload.locationName → city, skipping generic fallbacks
+      const raw = e.venue
+        || e.payload?.locationName
+        || (e.city && e.city !== 'Seattle' ? e.city : null)
+        || null;
+      if (!raw) continue;
+      const key = raw.trim();
+      neighborhoodCounts[key] = (neighborhoodCounts[key] || 0) + 1;
+    }
+
+    const neighborhoods = Object.entries(neighborhoodCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([name, eventCount]) => ({ name, eventCount }));
+
+    const { error: nbErr } = await supabase.from('analytics_snapshots').insert({
+      snapshot_type: 'neighborhoods',
+      data: { neighborhoods },
+    });
+    if (nbErr) console.warn('[analytics/refresh] neighborhood insert warning:', nbErr.message);
+    results.neighborhoods = neighborhoods;
+
+    // ── 2. Average Ticket Price ─────────────────────────────────────────────
+    // Exclude free events (is_free=true or price string indicates free/zero).
+    const { data: pricedEvents, error: priceErr } = await supabase
+      .from('kickflip_events')
+      .select('price, is_free, payload')
+      .eq('is_active', true)
+      .neq('is_free', true)
+      .limit(2000);
+
+    if (priceErr) throw new Error('price fetch: ' + priceErr.message);
+
+    let priceSum = 0;
+    let priceCount = 0;
+    for (const e of pricedEvents || []) {
+      const raw = e.price || e.payload?.price || '';
+      const stripped = String(raw).replace(/[^0-9.]/g, '');
+      const parsed = parseFloat(stripped);
+      if (!isNaN(parsed) && parsed > 0) {
+        priceSum += parsed;
+        priceCount++;
+      }
+    }
+    const avgTicketPrice = priceCount > 0 ? Math.round(priceSum / priceCount) : 0;
+
+    const { error: priceInsertErr } = await supabase.from('analytics_snapshots').insert({
+      snapshot_type: 'avg_ticket_price',
+      data: { avgTicketPrice, sampleSize: priceCount },
+    });
+    if (priceInsertErr) console.warn('[analytics/refresh] price insert warning:', priceInsertErr.message);
+    results.avgTicketPrice = avgTicketPrice;
+
+    // ── 3. Category Trends from Clickstream ─────────────────────────────────
+    // Step A: count clicks per event_id over last 30 days
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: clicks, error: clickErr } = await supabase
+      .from('event_clicks')
+      .select('event_id')
+      .gte('created_at', thirtyDaysAgo)
+      .limit(10000);
+
+    if (clickErr) console.warn('[analytics/refresh] click fetch warning:', clickErr.message);
+
+    const clicksByEvent = {};
+    for (const c of clicks || []) {
+      if (c.event_id) clicksByEvent[c.event_id] = (clicksByEvent[c.event_id] || 0) + 1;
+    }
+
+    // Step B: map event_id → category
+    const clickedIds = Object.keys(clicksByEvent);
+    const categoryClickCounts = {};
+
+    if (clickedIds.length > 0) {
+      const { data: clickedEventsData } = await supabase
+        .from('kickflip_events')
+        .select('id, category, payload')
+        .in('id', clickedIds.slice(0, 500));
+
+      for (const e of clickedEventsData || []) {
+        const cat = e.category || e.payload?.category || 'other';
+        categoryClickCounts[cat] = (categoryClickCounts[cat] || 0) + (clicksByEvent[e.id] || 0);
+      }
+    }
+
+    // Step C: ensure all active categories are represented (even with 0 clicks → market gap)
+    const { data: allActiveEvents } = await supabase
+      .from('kickflip_events')
+      .select('category, payload')
+      .eq('is_active', true)
+      .limit(1000);
+
+    for (const e of allActiveEvents || []) {
+      const cat = e.category || e.payload?.category || 'other';
+      if (cat && !(cat in categoryClickCounts)) categoryClickCounts[cat] = 0;
+    }
+
+    const sorted = Object.entries(categoryClickCounts).sort(([, a], [, b]) => b - a);
+    const top3 = sorted.slice(0, 3).map(([category, clicks]) => ({ category, clicks }));
+    const bottom3 = [...sorted].sort(([, a], [, b]) => a - b).slice(0, 3).map(([category, clicks]) => ({ category, clicks }));
+
+    const { error: trendInsertErr } = await supabase.from('analytics_snapshots').insert({
+      snapshot_type: 'category_trends',
+      data: { top3, bottom3, windowDays: 30 },
+    });
+    if (trendInsertErr) console.warn('[analytics/refresh] trend insert warning:', trendInsertErr.message);
+    results.categoryTrends = { top3, bottom3 };
+
+    console.log('[analytics/refresh] Done —', JSON.stringify(results, null, 2));
+    return res.json({ ok: true, computedAt: new Date().toISOString(), results });
+
+  } catch (err) {
+    console.error('[analytics/refresh] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ─── Analytics Latest Snapshot ────────────────────────────────────────────────
+//
+// GET /api/analytics/latest
+// Returns the most recent snapshot for each analytics type.
+// Used by the dashboard Business Health tab — no auth required.
+
+app.get('/api/analytics/latest', async (req, res) => {
+  try {
+    const types = ['neighborhoods', 'avg_ticket_price', 'category_trends'];
+    const results = {};
+
+    await Promise.all(types.map(async (type) => {
+      const { data, error } = await supabase
+        .from('analytics_snapshots')
+        .select('data, computed_at')
+        .eq('snapshot_type', type)
+        .order('computed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.warn(`[analytics/latest] ${type} fetch warning:`, error.message);
+        results[type] = null;
+      } else {
+        results[type] = data ? { ...data.data, computedAt: data.computed_at } : null;
+      }
+    }));
+
+    return res.json(results);
+  } catch (err) {
+    console.error('[analytics/latest] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`KickflipEvents backend running on port ${port}`);

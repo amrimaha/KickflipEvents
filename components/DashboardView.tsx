@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, EventDraft, VibemojiConfig } from '../types';
 import { EventVibemojiRenderer } from './EventVibemojiRenderer';
 import { createPortal } from 'react-dom';
@@ -7,6 +7,7 @@ import { VideoBackground } from './VideoBackground';
 import { EventCard } from './EventCard';
 import { IdentityCustomizer } from './IdentityCustomizer';
 import { draftToEvent } from '../constants';
+import { API_URL } from '../services/claudeService';
 
 interface DashboardViewProps {
   user: User;
@@ -23,10 +24,40 @@ interface DashboardViewProps {
 
 type Tab = 'summary' | 'events' | 'payments';
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ 
-  user, 
-  createdEvents, 
-  onBackHome, 
+interface ProviderStats {
+  eventsCreated: number;
+  ticketsSold: number;
+}
+
+interface NeighborhoodItem {
+  name: string;
+  eventCount: number;
+}
+
+interface CategoryTrendItem {
+  category: string;
+  clicks: number;
+}
+
+interface AnalyticsData {
+  neighborhoods: { neighborhoods: NeighborhoodItem[]; computedAt?: string } | null;
+  avg_ticket_price: { avgTicketPrice: number; sampleSize: number; computedAt?: string } | null;
+  category_trends: { top3: CategoryTrendItem[]; bottom3: CategoryTrendItem[]; computedAt?: string } | null;
+}
+
+// Maps category key → display name
+const CATEGORY_LABELS: Record<string, string> = {
+  food: 'Food & Drink', music: 'Music', art: 'Art', party: 'Party',
+  outdoor: 'Outdoors', wellness: 'Wellness', comedy: 'Comedy',
+  sports: 'Sports', fashion: 'Fashion', other: 'Other',
+  nightlife: 'Nightlife', theater: 'Theater', film: 'Film',
+};
+const catLabel = (key: string) => CATEGORY_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
+
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  user,
+  createdEvents,
+  onBackHome,
   brandIdentity,
   onUpdateBrand,
   onConnectStripe,
@@ -39,36 +70,78 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [selectedEvent, setSelectedEvent] = useState<EventDraft | null>(null);
   const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
   const [isStripeOnboardingOpen, setIsStripeOnboardingOpen] = useState(false);
-  
+
+  // ── Backend data state ───────────────────────────────────────────────
+  const [providerStats, setProviderStats] = useState<ProviderStats | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsRefreshing, setAnalyticsRefreshing] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+
   const accentColor = brandIdentity.primaryColor || '#34d399';
   const dashboardFont = brandIdentity.font || 'font-sans';
   const backgroundType = brandIdentity.backgroundType || 'image';
   const backgroundUrl = brandIdentity.backgroundUrl || 'https://images.pexels.com/photos/3165335/pexels-photo-3165335.jpeg';
 
-  // --- STATS CALCULATION ---
-  const stats = useMemo(() => {
-    const lifetimeRevenue = createdEvents.reduce((acc, curr) => acc + (curr.ticketsSold * parseFloat(curr.price || '0')), 0);
-    const lifetimeTickets = createdEvents.reduce((acc, curr) => acc + curr.ticketsSold, 0);
-    const avgPrice = createdEvents.length ? lifetimeRevenue / createdEvents.length : 0;
-    
-    return {
-      lifetimeRevenue,
-      lifetimeTickets,
-      totalCreated: createdEvents.length,
-      avgPrice
-    };
-  }, [createdEvents]);
+  // ── Fetch provider stats + analytics on mount ────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+
+    Promise.all([
+      fetch(`${API_URL}/api/dashboard/provider-stats?userId=${encodeURIComponent(user.id)}`)
+        .then(r => r.ok ? r.json() : Promise.reject(r.statusText)),
+      fetch(`${API_URL}/api/analytics/latest`)
+        .then(r => r.ok ? r.json() : Promise.reject(r.statusText)),
+    ])
+      .then(([stats, analytics]) => {
+        setProviderStats(stats);
+        setAnalyticsData(analytics);
+      })
+      .catch(err => {
+        console.warn('[DashboardView] analytics fetch failed:', err);
+        setAnalyticsError('Analytics unavailable. Run a refresh to compute insights.');
+      })
+      .finally(() => setAnalyticsLoading(false));
+  }, [user?.id]);
+
+  // ── Ad hoc analytics refresh ─────────────────────────────────────────
+  const handleRefreshAnalytics = async () => {
+    setAnalyticsRefreshing(true);
+    setAnalyticsError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/analytics/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-kickflip-source': 'dashboard' },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      // Re-fetch latest after refresh
+      const latest = await fetch(`${API_URL}/api/analytics/latest`).then(r => r.json());
+      setAnalyticsData(latest);
+    } catch (err: any) {
+      setAnalyticsError('Refresh failed: ' + err.message);
+    } finally {
+      setAnalyticsRefreshing(false);
+    }
+  };
+
+  // ── Revenue calc (for payments tab only, derived from local events) ──
+  const lifetimeRevenue = useMemo(() =>
+    createdEvents.reduce((acc, curr) => acc + (curr.ticketsSold * parseFloat(curr.price || '0')), 0),
+    [createdEvents]
+  );
 
   const groupedEvents = useMemo(() => {
     const now = new Date();
     const isPast = (e: EventDraft) => {
-        if (e.status === 'completed') return true;
-        if (e.status === 'draft') return false;
-        if (e.endDate) {
-            const dateTimeStr = `${e.endDate}T${e.endTime || '23:59'}`;
-            return new Date(dateTimeStr) < now;
-        }
-        return false;
+      if (e.status === 'completed') return true;
+      if (e.status === 'draft') return false;
+      if (e.endDate) {
+        const dateTimeStr = `${e.endDate}T${e.endTime || '23:59'}`;
+        return new Date(dateTimeStr) < now;
+      }
+      return false;
     };
     return {
       active: createdEvents.filter(e => e.status === 'active' && !isPast(e)),
@@ -93,9 +166,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     </button>
   );
 
+  // Helper: format computed_at as "Last updated X"
+  const lastUpdated = (isoDate?: string) => {
+    if (!isoDate) return null;
+    const d = new Date(isoDate);
+    return `Updated ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  };
+
   return (
     <div className={`min-h-screen bg-black text-white flex flex-col transition-all duration-500 overflow-x-hidden ${dashboardFont}`}>
-      
+
       {backgroundType === 'video' ? (
         <VideoBackground key={backgroundUrl} src={backgroundUrl} isOverlayDark={true} />
       ) : (
@@ -108,7 +188,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="relative z-10 flex flex-col min-h-screen">
           <header className="p-8 md:p-14 border-b border-white/5 flex flex-col md:flex-row justify-between items-center md:items-end bg-black/40 backdrop-blur-3xl gap-8">
             <div className="flex items-center gap-8">
-               <div 
+               <div
                  className="w-24 h-24 rounded-[2rem] border-2 border-white/10 overflow-hidden bg-white/5 flex items-center justify-center p-2 group cursor-pointer relative hover:border-white/40 transition-all shadow-2xl"
                  onClick={() => setIsIdentityModalOpen(true)}
                >
@@ -127,13 +207,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                </div>
             </div>
             <div className="flex gap-4">
-               <button 
+               <button
                  onClick={() => setIsIdentityModalOpen(true)}
                  className="px-6 py-3 rounded-2xl bg-white/5 border border-white/10 font-black text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all text-white/80"
                >
                  Customize Brand
                </button>
-               <button 
+               <button
                  onClick={onBackHome}
                  className="px-8 py-4 rounded-2xl bg-white text-black font-black text-[10px] uppercase tracking-[0.2em] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/5"
                >
@@ -151,24 +231,145 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <main className="flex-1 p-8 md:p-14 max-w-7xl mx-auto w-full pb-40">
              {activeTab === 'summary' && (
                 <div className="space-y-14 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                   
-                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                      <SummaryStatTile label="Lifetime Revenue" value={`$${stats.lifetimeRevenue.toLocaleString()}`} accent={accentColor} delay="delay-100" />
-                      <SummaryStatTile label="Tickets Sold" value={stats.lifetimeTickets.toLocaleString()} accent={accentColor} delay="delay-200" />
-                      <SummaryStatTile label="Events Created" value={stats.totalCreated.toString()} accent={accentColor} delay="delay-300" />
+
+                   {/* Summary Stat Tiles — Tickets Sold + Events Created (backend-backed) */}
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <SummaryStatTile
+                        label="Tickets Sold"
+                        value={analyticsLoading ? '—' : (providerStats?.ticketsSold ?? createdEvents.reduce((a, c) => a + c.ticketsSold, 0)).toLocaleString()}
+                        accent={accentColor}
+                        delay="delay-100"
+                        sub="Across all your events"
+                      />
+                      <SummaryStatTile
+                        label="Events Created"
+                        value={analyticsLoading ? '—' : (providerStats?.eventsCreated ?? createdEvents.length).toString()}
+                        accent={accentColor}
+                        delay="delay-200"
+                        sub="Published & active drops"
+                      />
                    </div>
+
+                   {/* Business Health + Brand Identity */}
                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+                      {/* Business Health Panel */}
                       <div className="lg:col-span-2 bg-black/40 backdrop-blur-xl border border-white/10 rounded-[3rem] p-12 relative overflow-hidden group shadow-2xl">
                          <div className="absolute -top-10 -right-10 w-64 h-64 bg-white/5 blur-3xl rounded-full group-hover:bg-white/10 transition-all duration-1000" />
-                         <h3 className="text-[10px] font-black mb-12 uppercase tracking-[0.4em] text-white/70">Business Health</h3>
-                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-12">
-                            <SimpleInsight label="Top Age Group" value="21–25" sub="42% of total dropouts" />
-                            <SimpleInsight label="Top District" value="Capitol Hill" sub="Highest ticket conversion" />
-                            <SimpleInsight label="Returning Guests" value="38%" sub="+4% from last drop" />
-                            <SimpleInsight label="Avg Ticket Cost" value={`$${stats.avgPrice.toFixed(0)}`} sub="Competitive for category" />
+                         <div className="flex items-center justify-between mb-10">
+                           <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/70">Business Health</h3>
+                           <div className="flex items-center gap-3">
+                             {analyticsData?.neighborhoods?.computedAt && (
+                               <span className="text-[9px] text-white/30 font-medium">
+                                 {lastUpdated(analyticsData.neighborhoods.computedAt)}
+                               </span>
+                             )}
+                             <button
+                               onClick={handleRefreshAnalytics}
+                               disabled={analyticsRefreshing}
+                               title="Run analytics batch job now (ad hoc)"
+                               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-40"
+                             >
+                               {analyticsRefreshing ? (
+                                 <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                               ) : (
+                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                               )}
+                               {analyticsRefreshing ? 'Computing…' : 'Refresh'}
+                             </button>
+                           </div>
                          </div>
+
+                         {analyticsError && (
+                           <p className="text-xs text-yellow-400/80 mb-8 font-medium">{analyticsError}</p>
+                         )}
+
+                         {analyticsLoading ? (
+                           <div className="flex items-center justify-center h-48">
+                             <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                           </div>
+                         ) : (
+                           <div className="space-y-12">
+                             {/* Avg Ticket Cost */}
+                             <div>
+                               <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/40 mb-2">Avg Ticket Cost</h4>
+                               <p className="text-2xl font-black text-white tracking-tight mb-1">
+                                 {analyticsData?.avg_ticket_price
+                                   ? `$${analyticsData.avg_ticket_price.avgTicketPrice}`
+                                   : '—'}
+                               </p>
+                               <p className="text-xs text-white/50 font-medium">
+                                 {analyticsData?.avg_ticket_price
+                                   ? `Based on ${analyticsData.avg_ticket_price.sampleSize} ticketed events`
+                                   : 'Run a refresh to compute'}
+                               </p>
+                             </div>
+
+                             {/* Top 5 Event-Dense Neighborhoods */}
+                             <div>
+                               <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/40 mb-4">Top 5 Event-Dense Neighborhoods</h4>
+                               {analyticsData?.neighborhoods?.neighborhoods?.length ? (
+                                 <ol className="space-y-2">
+                                   {analyticsData.neighborhoods.neighborhoods.map((n, i) => (
+                                     <li key={n.name} className="flex items-center gap-3">
+                                       <span className="w-5 text-[10px] font-black text-white/30 tabular-nums">#{i + 1}</span>
+                                       <div className="flex-1 flex items-center justify-between">
+                                         <span className="text-sm font-bold text-white">{n.name}</span>
+                                         <span className="text-xs text-white/50 font-medium">{n.eventCount} event{n.eventCount !== 1 ? 's' : ''}</span>
+                                       </div>
+                                       {/* Mini bar */}
+                                       <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                                         <div
+                                           className="h-full rounded-full"
+                                           style={{
+                                             backgroundColor: accentColor,
+                                             width: `${Math.round(100 * n.eventCount / (analyticsData.neighborhoods!.neighborhoods[0]?.eventCount || 1))}%`,
+                                           }}
+                                         />
+                                       </div>
+                                     </li>
+                                   ))}
+                                 </ol>
+                               ) : (
+                                 <p className="text-xs text-white/30 font-medium">No neighborhood data yet — run a refresh</p>
+                               )}
+                             </div>
+
+                             {/* Category Trends — Top 3 + Bottom 3 */}
+                             {analyticsData?.category_trends && (
+                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                                 <div>
+                                   <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-green-400/70 mb-4">Top 3 Trending</h4>
+                                   <ol className="space-y-2">
+                                     {analyticsData.category_trends.top3.map((c, i) => (
+                                       <li key={c.category} className="flex items-center gap-3">
+                                         <span className="text-[10px] font-black text-white/30 w-4">#{i + 1}</span>
+                                         <span className="flex-1 text-sm font-bold text-white">{catLabel(c.category)}</span>
+                                         <span className="text-xs text-green-400/80 font-bold">{c.clicks} clicks</span>
+                                       </li>
+                                     ))}
+                                   </ol>
+                                 </div>
+                                 <div>
+                                   <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-yellow-400/70 mb-4">Market Gap (Bottom 3)</h4>
+                                   <ol className="space-y-2">
+                                     {analyticsData.category_trends.bottom3.map((c, i) => (
+                                       <li key={c.category} className="flex items-center gap-3">
+                                         <span className="text-[10px] font-black text-white/30 w-4">#{i + 1}</span>
+                                         <span className="flex-1 text-sm font-bold text-white">{catLabel(c.category)}</span>
+                                         <span className="text-xs text-yellow-400/80 font-bold">{c.clicks} clicks</span>
+                                       </li>
+                                     ))}
+                                   </ol>
+                                 </div>
+                               </div>
+                             )}
+                           </div>
+                         )}
                       </div>
-                      <div 
+
+                      {/* Brand Identity Widget */}
+                      <div
                         className="bg-black/40 backdrop-blur-xl border border-white/10 rounded-[3rem] p-12 flex flex-col items-center justify-center text-center group cursor-pointer hover:border-white/30 transition-all shadow-2xl"
                         onClick={() => setIsIdentityModalOpen(true)}
                       >
@@ -184,6 +385,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                          <p className="text-xs text-white/70 leading-relaxed max-w-[180px] mb-8 uppercase font-bold tracking-widest">Global brand vibe across Kickflip</p>
                          <button className="text-[9px] font-black uppercase tracking-[0.3em] px-6 py-3 border border-white/10 rounded-full hover:bg-white hover:text-black transition-all">Adjust Brand</button>
                       </div>
+                   </div>
+
+                   {/* Analytics job explainer */}
+                   <div className="bg-white/3 border border-white/5 rounded-2xl p-6 text-xs text-white/40 font-medium leading-relaxed">
+                     <span className="text-white/60 font-black uppercase tracking-widest text-[9px] block mb-2">How Analytics Work</span>
+                     Neighborhood stats, avg ticket price, and category trends are computed by a <span className="text-white/60">nightly batch job</span> (Railway cron, 3am).
+                     Data is never computed at runtime — it reads from a pre-computed snapshot.
+                     Use the <span className="text-white/60">Refresh</span> button above to run an ad hoc computation at any time.
+                     Category trends reflect the last 30 days of user click activity.
                    </div>
                 </div>
              )}
@@ -211,7 +421,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                          </div>
                       </div>
                       {!user.stripeConnected && (
-                         <button 
+                         <button
                            onClick={() => setIsStripeOnboardingOpen(true)}
                            className="px-10 py-5 bg-white text-black font-black rounded-2xl hover:scale-105 active:scale-95 transition-all text-xs uppercase tracking-[0.2em] shadow-xl shadow-indigo-500/10"
                          >
@@ -226,9 +436,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       )}
                    </div>
                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      <MiniFinancialTile label="Projected" value={`$${(stats.lifetimeRevenue * 1.1).toFixed(0)}`} sub="Book of business" />
-                      <MiniFinancialTile label="Transferred" value={`$${(stats.lifetimeRevenue * 0.9).toFixed(0)}`} sub="Verified payouts" />
-                      <MiniFinancialTile label="Next Payment" value={`$${(stats.lifetimeRevenue * 0.25).toFixed(0)}`} sub="Rev this period" />
+                      <MiniFinancialTile label="Projected" value={`$${(lifetimeRevenue * 1.1).toFixed(0)}`} sub="Book of business" />
+                      <MiniFinancialTile label="Transferred" value={`$${(lifetimeRevenue * 0.9).toFixed(0)}`} sub="Verified payouts" />
+                      <MiniFinancialTile label="Next Payment" value={`$${(lifetimeRevenue * 0.25).toFixed(0)}`} sub="Rev this period" />
                       <MiniFinancialTile label="Next Payout" value="Scheduled" sub="Est. Nov 20th" />
                    </div>
                    <div className="bg-black/40 backdrop-blur-xl border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl">
@@ -274,10 +484,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {isIdentityModalOpen && (
-        <IdentityCustomizer 
-          config={brandIdentity} 
-          onUpdate={onUpdateBrand} 
-          onClose={() => setIsIdentityModalOpen(false)} 
+        <IdentityCustomizer
+          config={brandIdentity}
+          onUpdate={onUpdateBrand}
+          onClose={() => setIsIdentityModalOpen(false)}
         />
       )}
 
@@ -286,9 +496,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       )}
 
       {selectedEvent && (
-         <EventDetailOverlay 
-            event={selectedEvent} 
-            accentColor={accentColor} 
+         <EventDetailOverlay
+            event={selectedEvent}
+            accentColor={accentColor}
             onClose={() => setSelectedEvent(null)}
             onEdit={() => { onEditEvent(selectedEvent); setSelectedEvent(null); }}
             onViewPublic={() => onViewPublicPage(selectedEvent)}
@@ -301,25 +511,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
 // --- SUBCOMPONENTS ---
 
-const SummaryStatTile = ({ label, value, accent, delay }: { label: string, value: string, accent: string, delay: string }) => (
+const SummaryStatTile = ({ label, value, accent, delay, sub }: { label: string, value: string, accent: string, delay: string, sub?: string }) => (
   <div className={`bg-black/40 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-10 flex flex-col justify-between h-64 relative overflow-hidden group hover:border-white/30 transition-all shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-700 ${delay}`}>
       <div className="absolute top-0 right-0 p-8 opacity-20 group-hover:opacity-40 transition-opacity">
          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
       </div>
       <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/60">{label}</h3>
       <p className="text-5xl md:text-6xl font-black tracking-tighter text-white drop-shadow-lg" style={{ color: accent }}>{value}</p>
-      <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mt-4">
-         <div className="h-full bg-white/20 w-2/3 rounded-full" style={{ backgroundColor: accent }} />
+      <div>
+        {sub && <p className="text-xs text-white/40 font-medium mb-2">{sub}</p>}
+        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mt-1">
+           <div className="h-full bg-white/20 w-2/3 rounded-full" style={{ backgroundColor: accent }} />
+        </div>
       </div>
   </div>
-);
-
-const SimpleInsight = ({ label, value, sub }: { label: string, value: string, sub: string }) => (
-   <div>
-      <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/40 mb-2">{label}</h4>
-      <p className="text-2xl font-black text-white tracking-tight mb-1">{value}</p>
-      <p className="text-xs text-white/60 font-medium">{sub}</p>
-   </div>
 );
 
 const EventDeck = ({ title, events, count, onEventClick, accent, onDeleteEvent }: { title: string, events: EventDraft[], count: number, onEventClick: (e: EventDraft) => void, accent: string, onDeleteEvent: (id: string) => void }) => (
@@ -338,9 +543,8 @@ const EventDeck = ({ title, events, count, onEventClick, accent, onDeleteEvent }
                         event={kickflipEvent}
                         className="w-96 h-[34rem] snap-center"
                         onClick={() => onEventClick(draft)}
-                        // Inject Delete Button in Action Slot
                         actionSlot={
-                            <button 
+                            <button
                                 className="p-3 bg-red-600 text-white rounded-full hover:bg-red-500 hover:scale-110 transition-all shadow-xl opacity-0 group-hover:opacity-100"
                                 onClick={(e) => { e.stopPropagation(); if(confirm('Delete event?')) onDeleteEvent(draft.id); }}
                                 title="Delete Event"
@@ -348,7 +552,6 @@ const EventDeck = ({ title, events, count, onEventClick, accent, onDeleteEvent }
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                             </button>
                         }
-                        // Inject Dashboard Stats in Content Area
                         extraContent={
                             <div className="grid grid-cols-2 gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 group-hover:bg-white/10 transition-colors">
                                 <div>
@@ -394,7 +597,7 @@ const StripeOnboardingSimulation = ({ onComplete, onCancel }: { onComplete: () =
              </div>
              <h3 className="text-2xl font-bold text-center mb-2">Connect Stripe</h3>
              <p className="text-center text-gray-500 text-sm mb-8">Securely link your bank account to receive payouts from ticket sales instantly.</p>
-             
+
              <div className="space-y-4">
                  <div className="p-4 bg-gray-50 border rounded-xl flex items-center gap-3">
                      <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse" />
@@ -416,23 +619,20 @@ const StripeOnboardingSimulation = ({ onComplete, onCancel }: { onComplete: () =
 );
 
 const EventDetailOverlay = ({ event, accentColor, onClose, onEdit, onViewPublic, onDownloadGuestList }: { event: EventDraft, accentColor: string, onClose: () => void, onEdit: () => void, onViewPublic: () => void, onDownloadGuestList: () => void }) => {
-    // Cast Draft to Event for the card
     const kickflipEvent = draftToEvent(event);
 
     return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
         <div className="absolute inset-0 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-300" onClick={onClose} />
-        {/* Render EventCard in Detail Mode with Custom Footer */}
         <div className="relative w-full max-w-4xl h-[85vh] z-10 animate-in zoom-in-95 duration-300">
              <button onClick={onClose} className="absolute top-4 right-4 z-50 p-3 bg-black/50 text-white rounded-full hover:bg-white hover:text-black transition-all border border-white/10">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
              </button>
-             
-             <EventCard 
+
+             <EventCard
                 event={kickflipEvent}
                 variant="details"
                 className="w-full h-full shadow-2xl"
-                // Inject Dashboard Stats into Content Area
                 extraContent={
                     <div className="grid grid-cols-2 gap-8 py-4">
                          <div className="flex flex-col items-center p-4 bg-white/5 rounded-xl">
@@ -445,7 +645,6 @@ const EventDetailOverlay = ({ event, accentColor, onClose, onEdit, onViewPublic,
                          </div>
                     </div>
                 }
-                // Inject Dashboard Actions into Footer
                 footerSlot={
                     <div className="space-y-4 w-full max-w-md mx-auto">
                         <div className="grid grid-cols-2 gap-4">
